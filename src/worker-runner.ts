@@ -225,6 +225,7 @@ export async function executePendingWorkerTasks(
   registry: ModelRegistry,
   options: PendingWorkerOptions = {},
 ): Promise<PendingWorkerResult> {
+  await registry.assertReady(options.model);
   let run = structuredClone(initialRun);
   const results: AuditWorkerResult[] = [];
   const maxTasks = Math.max(0, Math.min(256, Math.floor(options.maxTasks ?? 64)));

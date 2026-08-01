@@ -304,6 +304,10 @@ async function runCase(item: BenchmarkCase, casesDirectory: string, options: Ben
 export async function runBenchmark(directory: string, split?: string, options: BenchmarkOptions = {}): Promise<BenchmarkReport> {
   const allCases = await loadCases(directory);
   if (options.manifestPath) await verifyBenchmarkManifest(directory, allCases, options.manifestPath);
+  if (options.model) {
+    if (!options.modelConfig) throw new Error("A model config is required for model-backed benchmark runs.");
+    await new ModelRegistry(options.modelConfig).assertReady(options.model);
+  }
   const cases = allCases.filter((item) => !split || item.split === split);
   if (cases.length === 0) throw new Error(`No benchmark cases found${split ? ` for split ${split}` : ""}.`);
   const results: BenchmarkCaseResult[] = [];

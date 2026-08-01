@@ -90,6 +90,11 @@ Provider responses are normalized to the same completion and token-usage
 contract. Model calls are not validation evidence; they are worker input to the
 existing candidate and validator workflow.
 
+Model-backed commands perform a credential preflight before opening the worker
+queue. A missing API key or OAuth token fails clearly with the required
+environment variable or `evo-audit auth` action; it is not reported as a
+successful static-only model run.
+
 API/OAuth providers receive the bounded source and graph context selected for a
 task. Do not configure an external provider for repositories whose policy does
 not permit source sharing; use a local OpenAI-compatible endpoint or omit model

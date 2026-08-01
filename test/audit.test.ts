@@ -265,6 +265,8 @@ test("model registry loads API/OAuth references and routes auto tasks without ex
     assert.equal(statuses.find((model) => model.id === "frontier")?.credentialAvailable, true);
     assert.equal(statuses.find((model) => model.id === "oauth")?.credentialAvailable, false);
     assert.equal(registry.select({ phase: "HUNT", priority: 100, estimatedInputTokens: 500, budgetTokens: 4000 }).id, "frontier");
+    await registry.assertReady("frontier");
+    await assert.rejects(() => registry.assertReady("oauth"), /No usable credential/i);
   } finally {
     delete process.env[keyName];
   }

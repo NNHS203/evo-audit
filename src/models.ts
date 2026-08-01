@@ -292,6 +292,16 @@ export class ModelRegistry {
     return chooseModel(this.config, request);
   }
 
+  async assertReady(model?: string): Promise<void> {
+    const statuses = await this.statuses();
+    const relevant = model && model !== "auto" ? statuses.filter((candidate) => candidate.id === model) : statuses.filter((candidate) => candidate.enabled);
+    if (relevant.length === 0) throw new Error(model && model !== "auto" ? `Model not found or disabled: ${model}.` : "No enabled models are configured for model-backed work.");
+    if (!relevant.some((candidate) => candidate.credentialAvailable)) {
+      const reasons = relevant.map((candidate) => `${candidate.id}: ${candidate.reason ?? "credential unavailable"}`).join("; ");
+      throw new Error(`No usable credential is available for model-backed work (${reasons}). Configure an API-key environment variable or run evo-audit auth for OAuth.`);
+    }
+  }
+
   async complete(request: ModelCompletionRequest): Promise<ModelCompletionResponse> {
     const model = chooseModel(this.config, request);
     const credential = await credentialFor(model);
