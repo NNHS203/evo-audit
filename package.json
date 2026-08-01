@@ -16,6 +16,7 @@
     "test": "npm run build && node --test dist/test/*.test.js",
     "start": "node dist/src/cli.js",
     "benchmark:ci": "npm run build && node dist/src/cli.js benchmark ./benchmark/cases --manifest ./benchmark/benchmark-manifest.json --split development --min-recall 1 --min-precision 1 --max-fpr 0",
+    "benchmark:validator-ci": "npm run build && node dist/src/cli.js benchmark ./benchmark/cases --manifest ./benchmark/benchmark-manifest.json --split validator --validate --min-recall 1 --min-precision 1 --max-fpr 0 --min-reportable-recall 1 --max-unsupported-claim-rate 0",
     "prepublishOnly": "npm run build"
   },
   "engines": {

@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "caseId": "js-dynamic-validator-gate-001",
+  "split": "validator",
+  "language": "javascript",
+  "file": "src/entry.js",
+  "code": "module.exports = { handler(req) { return eval(req.body.code); } };\n",
+  "property": "The independent validator must reproduce dynamic execution and pass a benign negative control before the finding is reportable.",
+  "expected": {
+    "vulnerable": true,
+    "ruleId": "JS-DYNAMIC-CODE-001",
+    "minimumReportableEvidence": "T2_REPRODUCIBLE"
+  },
+  "validation": {
+    "findingRuleId": "JS-DYNAMIC-CODE-001",
+    "reproducerCommand": "node -e 'const {handler}=require(\"./src/entry.js\"); delete globalThis.__evo_audit_pwned; handler({body:{code:\"globalThis.__evo_audit_pwned=42\"}}); if (globalThis.__evo_audit_pwned!==42) process.exit(1)'",
+    "negativeControlCommand": "node -e 'const {handler}=require(\"./src/entry.js\"); if (handler({body:{code:\"1+1\"}})!==2) process.exit(1)'",
+    "timeoutMs": 10000,
+    "image": "node:22-alpine"
+  },
+  "notes": [
+    "The validator CI job requires Docker or Podman and fails closed if the sandbox is unavailable.",
+    "A blocked validator is not a safe result."
+  ]
+}

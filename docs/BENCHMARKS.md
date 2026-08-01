@@ -103,6 +103,15 @@ positive and negative controls through the same read-only, no-network
 container boundary as normal audit validation. A missing Docker/Podman runtime
 produces `BLOCKED`, not a clean result.
 
+The public CI keeps this as a separate proof track:
+
+```bash
+npm run benchmark:validator-ci
+```
+
+It runs the `validator` split in Docker/Podman and requires
+`reportableRecall=1`; discovery recall cannot satisfy that gate.
+
 This protocol is the basis for a future cross-language adapter; it prevents a
 larger model, looser evidence policy, or unfinished scan from looking like a
 performance win.

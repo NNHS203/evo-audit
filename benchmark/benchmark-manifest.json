@@ -79,6 +79,12 @@
       "caseId": "python-ssti-template-001",
       "split": "development",
       "sha256": "1950a7318cf9f01244f30e26727c3634e435c2ce6e7a816cdb45d47a937f5cbc"
+    },
+    {
+      "file": "cases/js-dynamic-validator-gate-001.json",
+      "caseId": "js-dynamic-validator-gate-001",
+      "split": "validator",
+      "sha256": "0fdc47a4497856028b4863664fd43bdcdeb84fbf3dd66836d581e150ef4c62a4"
     }
   ],
   "notes": [

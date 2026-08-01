@@ -53,6 +53,9 @@ evo-audit benchmark ./benchmark/cases --split development \
 evo-audit benchmark ./benchmark/cases --split development \
   --validate
 
+# Proof track used by CI; requires a running Docker or Podman daemon.
+npm run benchmark:validator-ci
+
 # External reproducibility track; RealVuln is intentionally not vendored.
 git clone --depth 1 https://github.com/kolega-ai/Real-Vuln-Benchmark.git ./Real-Vuln-Benchmark
 evo-audit realvuln ./Real-Vuln-Benchmark \
@@ -68,6 +71,11 @@ traps, unknown-coverage rate, and tokens per case. These are discovery metrics;
 they are not a claim of real-world vulnerability recall. A later model-backed
 runner must preserve the same case IDs and add validator evidence before
 reporting validated metrics.
+
+The `validator` split is intentionally separate from discovery CI. Its
+acceptance gate requires an actual `VERIFIED` finding with
+`reportableRecall=1`; unavailable Docker/Podman produces `BLOCKED` and fails
+that proof job rather than being counted as safe.
 
 Threshold flags turn the discovery metrics into a CI acceptance gate and exit
 non-zero on regression. The gate intentionally does not assert that unknown
