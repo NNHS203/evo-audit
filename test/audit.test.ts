@@ -811,6 +811,8 @@ test("revalidation keeps a disappeared verified finding actionable", async () =>
   assert.equal(plan.status, "ACTION_REQUIRED");
   assert.equal(plan.items.some((item) => item.lifecycle === "UNKNOWN" && item.action === "REVALIDATE"), true);
   assert.equal(plan.requiredFindingIds.includes(before.run.findings[0].id), true);
+  assert.equal(plan.metrics.revalidationRequiredCount > 0, true);
+  assert.equal(plan.metrics.fixRegressionRate, 0);
 });
 
 test("benchmark acceptance gate is explicit about metric regressions", () => {

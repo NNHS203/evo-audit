@@ -160,7 +160,9 @@ with unfinished repositories counted as misses:
 decision artifact. New findings require validation, previously verified
 findings that disappear remain `UNKNOWN` until the after run proves validated
 semantic coverage, and a still-verified finding is marked as a blocking
-regression.
+regression. The artifact also exposes `fixConfirmationRate`,
+`fixRegressionRate`, verified counts before/after, and the number of findings
+that still require revalidation.
 
 The worker protocol also quarantines rule IDs that are not present in the
 versioned playbook as `UNKNOWN`. This keeps model creativity from silently

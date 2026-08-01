@@ -127,6 +127,11 @@ when available. It prints candidate precision/recall/FPR/F3 separately from
 reportable recall and tokens per validated finding; it does not infer a clean
 result from a missing scanner finding.
 
+`revalidate` artifacts include structured fix metrics: confirmed-fix rate,
+blocking regression count/rate, verified counts before/after, and the number of
+findings that still require revalidation. A disappeared finding is not counted
+as fixed when the after snapshot is only static or otherwise incomplete.
+
 ## Token usage
 
 An audit session is the output directory (`audit-runs/` by default). Evo Audit

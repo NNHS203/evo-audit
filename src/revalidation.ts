@@ -29,6 +29,15 @@ export interface RevalidationPlan {
   items: RevalidationItem[];
   requiredFindingIds: string[];
   blockingIdentities: string[];
+  metrics: {
+    beforeVerifiedCount: number;
+    afterVerifiedCount: number;
+    revalidationRequiredCount: number;
+    blockingRegressionCount: number;
+    resolvedCount: number;
+    fixConfirmationRate: number | null;
+    fixRegressionRate: number | null;
+  };
   notes: string[];
 }
 
@@ -70,6 +79,10 @@ export function buildRevalidationPlan(before: AuditRun, after: AuditRun): Revali
     .map((item) => item.afterFindingId ?? item.beforeFindingId)
     .filter((id): id is string => Boolean(id));
   const blockingIdentities = items.filter((item) => item.action === "BLOCKING_REGRESSION").map((item) => item.identity);
+  const resolved = items.filter((item) => item.lifecycle === "RESOLVED");
+  const confirmedFixes = resolved.filter((item) => item.action === "NO_ACTION");
+  const beforeVerifiedCount = before.findings.filter((finding) => finding.status === "VERIFIED").length;
+  const afterVerifiedCount = after.findings.filter((finding) => finding.status === "VERIFIED").length;
   return {
     schemaVersion: 1,
     planId: planId(before, after),
@@ -81,6 +94,15 @@ export function buildRevalidationPlan(before: AuditRun, after: AuditRun): Revali
     items,
     requiredFindingIds: [...new Set(requiredFindingIds)],
     blockingIdentities,
+    metrics: {
+      beforeVerifiedCount,
+      afterVerifiedCount,
+      revalidationRequiredCount: actionable.length,
+      blockingRegressionCount: blockingIdentities.length,
+      resolvedCount: resolved.length,
+      fixConfirmationRate: resolved.length === 0 ? null : confirmedFixes.length / resolved.length,
+      fixRegressionRate: beforeVerifiedCount === 0 ? null : blockingIdentities.length / beforeVerifiedCount,
+    },
     notes: [
       "A missing finding is not treated as fixed unless the after run proves complete validated semantic coverage.",
       "Use verify against the after run to create a fresh request, then validate it with an independent validator.",
@@ -88,4 +110,3 @@ export function buildRevalidationPlan(before: AuditRun, after: AuditRun): Revali
     ],
   };
 }
-

@@ -441,6 +441,7 @@ async function main(): Promise<void> {
     else {
       console.log(`Revalidation ${plan.beforeRunId} -> ${plan.afterRunId}: ${plan.status}`);
       console.log(`Actions: ${plan.items.filter((item) => item.action !== "NO_ACTION").length}  blocking=${plan.blockingIdentities.length}`);
+      console.log(`Fix metrics: confirmation=${plan.metrics.fixConfirmationRate ?? "n/a"} regression-rate=${plan.metrics.fixRegressionRate ?? "n/a"} revalidation-required=${plan.metrics.revalidationRequiredCount}`);
       for (const item of plan.items) console.log(`- [${item.action}] ${item.lifecycle} ${item.identity}: ${item.reason}`);
       console.log(`Artifact: ${output}`);
     }
