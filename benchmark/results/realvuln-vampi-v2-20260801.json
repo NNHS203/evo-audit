@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "status": "OBSERVED_HOLDOUT",
+  "benchmark": "RealVuln",
+  "benchmarkVersion": "2.0.0",
+  "benchmarkRepositoryRevision": "98872da5caa25eb4d4bc7d5b93e10e08148a2049",
+  "repository": {
+    "id": "realvuln-vampi",
+    "commit": "1713b54b601ad29582581eeda4b31fceb1319874",
+    "language": "python",
+    "framework": "flask"
+  },
+  "groundTruth": {
+    "labels": 19,
+    "vulnerableLabels": 15,
+    "safeLabels": 4,
+    "sha256": "f4191dbd54e55595726b3ccee267c9e387457d58c61e6e7f1f25b39468bf0aeb"
+  },
+  "auditedTreeDigest": "b3d0219df63755785a2afd86998c33796bcbab1cd0fe93007a9fca4a4f072635",
+  "scoring": {
+    "lineTolerance": 10,
+    "reportableRequiresIndependentValidator": true
+  },
+  "scanners": {
+    "evo-audit": {
+      "commit": "b602028",
+      "findings": 15,
+      "candidate": {
+        "truePositive": 15,
+        "falsePositive": 0,
+        "falseNegative": 0,
+        "trueNegative": 4,
+        "precision": 1,
+        "recall": 1,
+        "falsePositiveRate": 0,
+        "f3": 1
+      },
+      "reportable": {
+        "truePositive": 0,
+        "falsePositive": 0,
+        "falseNegative": 15,
+        "recall": 0
+      }
+    }
+  },
+  "notes": [
+    "This is a pinned observed holdout, not a CI acceptance threshold or a benchmark-wide claim.",
+    "The target was not used for the development-case rules; it exercises Python API property detectors across SQLi, IDOR/BOLA, mass assignment, sensitive data, user enumeration, ReDoS, secrets, debug mode, missing authentication, cleartext passwords, and rate-limit gaps.",
+    "No independent runtime validator was run for this holdout; reportable recall is therefore zero by policy.",
+    "One separate manifest entry, realvuln-vulnerable-api, was not runnable because its published GitHub URL returned repository-not-found; that external availability failure was not scored as a security result."
+  ]
+}

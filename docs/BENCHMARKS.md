@@ -60,6 +60,14 @@ without independent validation. This is one pinned Python target, not a
 benchmark-wide or frontier-wide superiority claim; more repositories and
 independent validators are required before generalizing it.
 
+A separate pinned holdout, VAmPI (`realvuln-vampi`), is recorded at
+[`benchmark/results/realvuln-vampi-v2-20260801.json`](../benchmark/results/realvuln-vampi-v2-20260801.json).
+Commit `b602028` measured 15/15 vulnerable labels, 0/4 false-positive traps,
+precision 1.000, recall 1.000, and F3 1.000. This is still an observed
+two-repository Python result, not a general claim about all repositories or
+models. One other manifest URL returned repository-not-found and was excluded
+from scoring rather than silently treated as a miss.
+
 For a local pinned checkout, a case can use a source reference instead of
 embedding code:
 
