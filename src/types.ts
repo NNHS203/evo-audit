@@ -115,8 +115,72 @@ export interface AuditSnapshot {
 export interface AuditCoverage {
   complete: boolean;
   strategy: "FULL_SCAN" | "DIFF" | "PARTIAL";
+  semantic: "STATIC_ONLY" | "PARTIAL_WORKER" | "VALIDATED";
   filesReviewed: string[];
   unknownReason?: string;
+}
+
+export type WorkflowTaskStatus = "PENDING" | "WAITING" | "COMPLETED" | "BLOCKED" | "DEFERRED";
+
+export interface ModuleGraphEdge {
+  from: string;
+  to: string;
+  specifier: string;
+}
+
+export interface AuditRecon {
+  schemaVersion: 1;
+  projectKind: "NODE_TYPESCRIPT" | "NODE_JAVASCRIPT" | "UNKNOWN";
+  ruleInventory: Array<{ id: string; title: string; severity: Severity; evidenceRequired: EvidenceTier }>;
+  manifests: string[];
+  scripts: Record<string, string>;
+  entrypoints: string[];
+  securitySurface: Array<{ file: string; signals: string[] }>;
+  moduleGraph: {
+    nodes: number;
+    edgeCount: number;
+    unresolvedImports: number;
+    edges: ModuleGraphEdge[];
+  };
+  focusFiles: string[];
+  contextDigest: string;
+  notes: string[];
+}
+
+export interface AuditContextSlice {
+  targetFiles: string[];
+  files: Array<{
+    path: string;
+    relation: "TARGET" | "IMPORTS" | "IMPORTED_BY" | "CHANGED" | "SURFACE";
+    distance: number;
+  }>;
+  truncated: boolean;
+  rationale: string[];
+}
+
+export interface AuditTask {
+  id: string;
+  phase: "HUNT" | "INVESTIGATE" | "VALIDATE";
+  findingId: string | null;
+  obligationId: string | null;
+  ruleId?: string;
+  title: string;
+  priority: number;
+  status: WorkflowTaskStatus;
+  budgetTokens: number;
+  context: AuditContextSlice;
+  dependsOn: string[];
+  rationale: string[];
+}
+
+export interface AuditPlan {
+  schemaVersion: 1;
+  runId: string;
+  tokenBudget: number;
+  allocatedTokens: number;
+  unallocatedTokens: number;
+  tasks: AuditTask[];
+  notes: string[];
 }
 
 export interface TokenAccounting {
@@ -140,6 +204,8 @@ export interface AuditRun {
   files: FileFingerprint[];
   snapshot: AuditSnapshot;
   coverage: AuditCoverage;
+  recon?: AuditRecon;
+  plan?: AuditPlan;
   semanticDelta: SemanticDelta;
   obligations: AuditObligation[];
   findings: Finding[];
@@ -151,12 +217,15 @@ export interface AuditRun {
 export interface AuditWorkerContext {
   run: AuditRun;
   playbook: AuditPlaybook;
-  obligation: AuditObligation;
+  obligation?: AuditObligation;
   workspaceRoot: string;
+  context?: AuditContextSlice;
+  task?: AuditTask;
 }
 
 export interface AuditWorkerResult {
   worker: string;
+  taskId?: string;
   findings: Array<
     Partial<Finding> & {
       ruleId: string;

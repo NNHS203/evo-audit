@@ -44,6 +44,7 @@ export function compareRuns(before: AuditRun, after: AuditRun): RunComparison {
   const afterFindings = indexFindings(after.findings);
   const identities = new Set([...beforeFindings.keys(), ...afterFindings.keys()]);
   const afterCoverageComplete = after.coverage?.complete === true;
+  const afterSemantic = after.coverage?.semantic ?? "STATIC_ONLY";
   const findings: FindingComparison[] = [];
 
   for (const identity of identities) {
@@ -51,7 +52,9 @@ export function compareRuns(before: AuditRun, after: AuditRun): RunComparison {
     const current = afterFindings.get(identity);
     let lifecycle: FindingLifecycle;
     if (!previous && current) lifecycle = "NEW";
-    else if (previous && !current) lifecycle = afterCoverageComplete ? "RESOLVED" : "UNKNOWN";
+    else if (previous && !current) {
+      lifecycle = !afterCoverageComplete || (previous.status === "VERIFIED" && afterSemantic !== "VALIDATED") ? "UNKNOWN" : "RESOLVED";
+    }
     else if (previous && current && previous.status === "VERIFIED" && current.status !== "VERIFIED") lifecycle = "REOPENED";
     else lifecycle = "PERSISTING";
     findings.push({ identity, lifecycle, before: previous, after: current });
@@ -66,7 +69,7 @@ export function compareRuns(before: AuditRun, after: AuditRun): RunComparison {
     coverage: {
       complete: afterCoverageComplete,
       note: afterCoverageComplete
-        ? "Missing findings are treated as resolved because the after run declares complete coverage."
+        ? `Missing unverified candidates may be treated as resolved because the after run declares complete file coverage (${afterSemantic}); previously VERIFIED findings remain UNKNOWN until revalidation is complete.`
         : "Missing findings remain UNKNOWN because the after run does not prove complete coverage.",
     },
     findings,

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { discoverFiles, loadConfig } from "./core.js";
+import { buildAuditPlan } from "./workflow.js";
 import type {
   AuditRun,
   EvidenceItem,
@@ -39,6 +40,11 @@ function sourceFilesMatchRun(run: AuditRun, result: ValidationResult, targetFile
   return targetFiles.every((file) => expected.has(file) && observed.get(file) === expected.get(file));
 }
 
+function evidenceLocationsMatchRun(run: AuditRun, result: ValidationResult): boolean {
+  const inScope = new Set(run.files.map((file) => file.path));
+  return (result.evidence ?? []).every((item) => (item.locations ?? []).every((location) => inScope.has(location.file) && location.line > 0 && location.column > 0));
+}
+
 function validationEvidence(result: ValidationResult): EvidenceItem[] {
   const base: EvidenceItem[] = [
     {
@@ -68,12 +74,17 @@ export function validateResultAgainstRun(run: AuditRun, result: ValidationResult
   if (!finding) return { accepted: false, status: "HARNESS_FAILED", reason: "Validation references a finding that is not present in the run." };
   const targetFiles = findingTargetFiles(finding);
   if (targetFiles.length === 0) return { accepted: false, status: "HARNESS_FAILED", reason: "Validation cannot verify a finding without a source location." };
+  if (!result.validator.trim()) return { accepted: false, status: "HARNESS_FAILED", reason: "Validation must identify an independent validator." };
+  if (finding.worker && finding.worker === result.validator) return { accepted: false, status: "HARNESS_FAILED", reason: "The finding worker cannot also act as its independent validator." };
   if (result.runId !== run.runId) return { accepted: false, status: "HARNESS_FAILED", reason: "Validation runId does not match the audit run." };
   if (result.baseTreeDigest !== runTreeDigest(run)) {
     return { accepted: false, status: "HARNESS_FAILED", reason: "Validation was produced from a different source snapshot." };
   }
   if (!sourceFilesMatchRun(run, result, targetFiles)) {
     return { accepted: false, status: "HARNESS_FAILED", reason: "Validator source fingerprints do not match the finding's audited files." };
+  }
+  if (!evidenceLocationsMatchRun(run, result)) {
+    return { accepted: false, status: "HARNESS_FAILED", reason: "Validator evidence references a file or location outside the audited snapshot." };
   }
   if (result.sandbox.profile === "HOST_UNSAFE" || !result.sandbox.readOnlySource || result.sandbox.network === "UNRESTRICTED") {
     return { accepted: false, status: "HARNESS_FAILED", reason: "Verification did not run under an approved read-only sandbox policy." };
@@ -165,6 +176,11 @@ export function applyValidationResult(runInput: AuditRun, result: ValidationResu
   }
 
   run.notes = [...new Set([...run.notes, `Validator ${result.validator} applied: ${gate.status}.` , ...(result.notes ?? [])])];
+  if (run.coverage) run.coverage = { ...run.coverage, semantic: "PARTIAL_WORKER" };
+  run.plan = buildAuditPlan(run, run.plan?.tokenBudget ?? 12_000);
+  if (run.plan.tasks.length > 0 && run.plan.tasks.every((task) => task.status === "COMPLETED") && run.coverage) {
+    run.coverage = { ...run.coverage, semantic: "VALIDATED" };
+  }
   run.completedAt = new Date().toISOString();
   return { run, gate };
 }

@@ -24,6 +24,11 @@ The primary metrics are deliberately separate:
 An empty report is not a pass. A case is only closed when the audit artifact
 contains the required evidence and a negative control where applicable.
 
+The workflow plan is part of the artifact contract: a rule with no static
+match should produce a `HUNT` task, and a `STATIC_ONLY` run must not be scored
+as semantically complete. This prevents a detector's blind spot from being
+mistaken for a true negative.
+
 The intended research loop is: run a frozen playbook on train cases, propose a
 reviewable playbook revision, evaluate it on development cases, then report
 once on holdout. This makes improvements in the audit procedure measurable

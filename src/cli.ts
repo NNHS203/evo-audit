@@ -6,10 +6,29 @@ import { buildResumePlan } from "./resume.js";
 import { toSarif } from "./sarif.js";
 import { applyValidationResult, assertWorkspaceMatchesSnapshot, createValidationRequest } from "./validator.js";
 import { mergeWorkerResult } from "./workers.js";
+import { buildAuditPlan, planSummary } from "./workflow.js";
 import type { AuditRun, AuditWorkerResult, ValidationResult } from "./types.js";
 
 function usage(): string {
-  return `Evo Audit\n\nCommands:\n  init <path>                         Create audit.config.json and audit.playbook.json\n  review <path> [--output DIR]        Run the audit core in review mode\n  run <path> [--output DIR]           Alias for review\n  run <path> --baseline RUN.json      Record semantic delta for worker prioritization\n  run <path> --strict                 Show only evidence-policy reportable findings\n  verify <run.json> <finding-id>      Create a validator request for one finding\n  validate <run.json> <result.json>   Apply an independent validator result\n  compare <before.json> <after.json> Compare findings by root cause across runs\n  status <run.json>                   Show coverage and pending obligations\n  resume <run.json> [--output FILE]   Write a resumable pending-work plan\n  ingest <run.json> <worker.json>     Merge a Frontier worker result into a saved run\n  evolve <run.json> [--output FILE]   Propose playbook improvements from audit gaps\n  report <run.json> [--format FORMAT] Print text, json, or sarif\n\nWorkers may propose hypotheses, but only an independent validator may create VERIFIED evidence.`;
+  return `Evo Audit
+
+Commands:
+  init <path>                         Create audit.config.json and audit.playbook.json
+  review <path> [--output DIR]        Run the audit core in review mode
+  run <path> [--output DIR]           Alias for review
+  run <path> --baseline RUN.json      Record semantic delta for worker prioritization
+  run <path> --strict                 Show only evidence-policy reportable findings
+  verify <run.json> <finding-id>      Create a validator request for one finding
+  validate <run.json> <result.json>   Apply an independent validator result
+  compare <before.json> <after.json> Compare findings by root cause across runs
+  plan <run.json> [--json]            Show prioritized investigation/validation tasks
+  status <run.json>                   Show coverage and pending obligations
+  resume <run.json> [--output FILE]   Write a resumable pending-work plan
+  ingest <run.json> <worker.json>     Merge a Frontier worker result into a saved run
+  evolve <run.json> [--output FILE]   Propose playbook improvements from audit gaps
+  report <run.json> [--format FORMAT] Print text, json, or sarif
+
+Workers may propose hypotheses, but only an independent validator may create VERIFIED evidence.`;
 }
 
 function flag(args: string[], name: string): boolean {
@@ -102,8 +121,26 @@ async function main(): Promise<void> {
     if (flag(args, "--json")) console.log(JSON.stringify(comparison, null, 2));
     else {
       console.log(`Compare ${comparison.beforeRunId} -> ${comparison.afterRunId}`);
-      console.log(`Coverage: ${comparison.coverage.complete ? "complete" : "unknown"}`);
+      console.log(`Coverage: ${comparison.coverage.complete ? "complete" : "unknown"}  ${comparison.coverage.note}`);
       for (const item of comparison.findings) console.log(`- [${item.lifecycle}] ${item.identity}`);
+    }
+    return;
+  }
+
+  if (command === "plan") {
+    if (!input) throw new Error("plan requires a run.json");
+    const run = await readJson<AuditRun>(path.resolve(cwd, input));
+    const workflowPlan = run.plan ?? buildAuditPlan(run);
+    if (flag(args, "--json")) {
+      console.log(JSON.stringify(workflowPlan, null, 2));
+    } else {
+      console.log(`Run ${run.runId}`);
+      console.log(planSummary(workflowPlan));
+      for (const task of workflowPlan.tasks) {
+        const context = task.context.files.map((file) => `${file.relation.toLowerCase()}:${file.path}`).join(", ");
+        console.log(`- [${task.status}] ${task.phase} priority=${task.priority} budget=${task.budgetTokens} ${task.title}`);
+        console.log(`  context: ${context || "none"}`);
+      }
     }
     return;
   }
@@ -116,7 +153,8 @@ async function main(): Promise<void> {
       if (flag(args, "--json")) console.log(JSON.stringify(plan, null, 2));
       else {
         console.log(`Run ${run.runId}`);
-        console.log(`Coverage: ${run.coverage?.complete ? "complete" : "unknown"}  Pending obligations: ${plan.pendingObligations.length}`);
+        console.log(`Coverage: ${run.coverage?.complete ? "complete" : "unknown"}  semantic=${run.coverage?.semantic ?? "unknown"}  Pending obligations: ${plan.pendingObligations.length}`);
+        console.log(planSummary(run.plan ?? buildAuditPlan(run)));
         for (const obligation of plan.pendingObligations) console.log(`- [${obligation.status}] ${obligation.id}: ${obligation.title}`);
       }
       return;

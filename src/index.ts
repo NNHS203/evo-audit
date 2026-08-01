@@ -7,3 +7,4 @@ export * from "./sarif.js";
 export * from "./types.js";
 export * from "./workers.js";
 export * from "./validator.js";
+export * from "./workflow.js";

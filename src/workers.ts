@@ -8,6 +8,7 @@ import type {
   FindingStatus,
   SourceLocation,
 } from "./types.js";
+import { buildAuditPlan } from "./workflow.js";
 
 const statusRank: Record<FindingStatus, number> = {
   HARNESS_FAILED: 0,
@@ -234,6 +235,23 @@ export function mergeWorkerResult(runInput: AuditRun, result: AuditWorkerResult)
 
   const workerNote = `Worker ${result.worker} ingested; claims remain evidence-gated.`;
   run.notes = uniqueStrings([...run.notes, workerNote, ...(result.notes ?? [])]);
+  if (run.coverage) run.coverage = { ...run.coverage, semantic: "PARTIAL_WORKER" };
+  run.plan = buildAuditPlan(run, run.plan?.tokenBudget ?? 12_000);
+  if (result.taskId) {
+    const task = run.plan.tasks.find((candidate) => candidate.id === result.taskId);
+    if (task) {
+      const reportedTokens = nonNegativeNumber(reported?.inputTokens, 0) + nonNegativeNumber(reported?.outputTokens, 0);
+      if (task.budgetTokens > 0 && reportedTokens > task.budgetTokens) {
+        task.status = "BLOCKED";
+        run.notes = uniqueStrings([...run.notes, `Worker ${result.worker} exceeded task budget: ${reportedTokens} > ${task.budgetTokens} tokens.`]);
+      } else {
+        task.status = "COMPLETED";
+      }
+    }
+  }
+  if (run.plan.tasks.length > 0 && run.plan.tasks.every((task) => task.status === "COMPLETED") && run.coverage) {
+    run.coverage = { ...run.coverage, semantic: "VALIDATED" };
+  }
   run.completedAt = new Date().toISOString();
   return run;
 }

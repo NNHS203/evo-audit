@@ -6,12 +6,19 @@ Frontier audit workers, but does not allow a model to grade its own homework.
 The core workflow is:
 
 ```text
-snapshot -> obligations -> worker hypotheses -> independent validator -> finding
+snapshot -> recon/context slices -> prioritized plan -> worker hypotheses -> independent validator -> finding
 ```
 
 Static detectors create hypotheses and falsifiable obligations. A worker may
 propose an attack path or a validation request, but only an independent
 validator can create `T2_REPRODUCIBLE` evidence and `VERIFIED` status.
+
+Every review also produces a deterministic `recon.json` and `plan.json`.
+Recon records manifests, useful package scripts, likely entrypoints, security
+surfaces, and a lightweight module graph. The plan gives each obligation a
+priority, a bounded context slice, and a token allocation. This prevents the
+worker from receiving the whole repository by default and makes token budget a
+workflow constraint rather than a config value that is merely recorded.
 
 ## Quick start
 
@@ -47,6 +54,9 @@ evo-audit validate ./audit-runs/<run>/run.json ./validation-result.json
 # Track root causes across scans, without treating incomplete coverage as clean.
 evo-audit compare ./before/run.json ./after/run.json
 
+# Inspect the prioritized investigation and validation queue.
+evo-audit plan ./audit-runs/<run>/run.json
+
 # Inspect or resume pending obligations.
 evo-audit status ./audit-runs/<run>/run.json
 evo-audit resume ./audit-runs/<run>/run.json
@@ -55,6 +65,27 @@ evo-audit resume ./audit-runs/<run>/run.json
 Reports support `text`, `json`, and `sarif` formats. SARIF results include
 stable root-cause fingerprints so downstream code-scanning systems can track
 findings even when line numbers move.
+
+## Optimized worker loop
+
+Workers should consume one plan task at a time:
+
+1. Read the task's target files and compact context slice. `HUNT` tasks exist
+   even when the static detector found no match.
+2. Trace the suspected source, sink, guard, and impact boundary.
+3. Expand context only along imports, importers, changed files, or an identified
+   authorization/entrypoint surface.
+4. Return supporting evidence and a falsifier; never return `VERIFIED` as a
+   final authority.
+5. Let the independent validator run the positive reproducer and negative
+   control against the pinned snapshot.
+
+`STATIC_ONLY`, `PARTIAL_WORKER`, and `VALIDATED` describe semantic coverage;
+`PENDING`, `WAITING`, and `DEFERRED` are workflow states, not security
+verdicts. A deferred task means the worker budget was exhausted; it does not
+mean the code was reviewed or safe. The graph currently provides lexical
+module context only. It is intentionally not presented as semantic reachability
+until a TypeScript/JavaScript AST and data-flow layer is added.
 
 ## Evidence contract
 
@@ -83,6 +114,11 @@ results are ingested through the JSON protocol:
 evo-audit ingest ./audit-runs/<run>/run.json ./worker-result.json
 ```
 
+When a worker consumes a planned task, it should include that task's `taskId`
+and token accounting. The ingest step marks the task complete only within its
+allocation; an over-budget task is recorded as `BLOCKED` and never becomes
+proof by itself.
+
 Worker claims are deliberately downgraded to hypotheses/supporting evidence.
 The validator-owned ledger is the only path to `VERIFIED`.
 
@@ -95,6 +131,8 @@ repositories. Playbook changes should be evaluated on held-out cases before
 they are accepted.
 
 The benchmark contract is documented in [`benchmark/README.md`](benchmark/README.md).
+The workflow rationale and research references are documented in
+[`docs/WORKFLOW.md`](docs/WORKFLOW.md).
 
 ## Safety boundary
 

@@ -4,6 +4,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { defaultConfig, defaultPlaybook } from "./playbook.js";
 import { detectFindings } from "./detectors.js";
+import { buildAuditPlan, buildAuditRecon, planSummary } from "./workflow.js";
 import type {
   AuditConfig,
   AuditObligation,
@@ -146,6 +147,7 @@ export async function runAudit(rootInput: string, options: { output: string; str
   const startedAt = new Date().toISOString();
   const relativeFiles = await discoverFiles(root, config);
   const files: FileFingerprint[] = [];
+  const sourceContents = new Map<string, string>();
   const allFindings: Finding[] = [];
   const allObligations: AuditObligation[] = [];
 
@@ -153,6 +155,7 @@ export async function runAudit(rootInput: string, options: { output: string; str
     const buffer = await fs.readFile(path.join(root, relative));
     files.push({ path: relative, sha256: sha256(buffer), bytes: buffer.byteLength });
     const content = buffer.toString("utf8");
+    sourceContents.set(relative, content);
     const result = detectFindings(relative, content, playbook, runId);
     allFindings.push(...result.findings);
     allObligations.push(...result.obligations);
@@ -170,6 +173,7 @@ export async function runAudit(rootInput: string, options: { output: string; str
     capturedAt: completedAt,
     files,
   };
+  const recon = await buildAuditRecon(root, files, sourceContents, allFindings, semanticDelta, config, playbook);
   const run: AuditRun = {
     schemaVersion: 1,
     runId,
@@ -185,8 +189,10 @@ export async function runAudit(rootInput: string, options: { output: string; str
     coverage: {
       complete: true,
       strategy: "FULL_SCAN",
+      semantic: "STATIC_ONLY",
       filesReviewed: relativeFiles,
     },
+    recon,
     semanticDelta,
     obligations: allObligations,
     findings: allFindings,
@@ -202,10 +208,14 @@ export async function runAudit(rootInput: string, options: { output: string; str
       "This run used only deterministic static detectors.",
       "SUSPECTED and SUPPORTED findings require an execution-capable worker before they can be reported as VERIFIED.",
       "No finding is evidence that untested code is safe.",
+      "Semantic coverage is STATIC_ONLY until worker hunt tasks and independent validation close the workflow queue.",
       `Semantic delta basis: ${semanticDelta.basis}; changed=${semanticDelta.changed.length}, added=${semanticDelta.added.length}, removed=${semanticDelta.removed.length}.`,
       `Snapshot tree digest: ${snapshot.treeDigest}.`,
+      `Recon context digest: ${recon.contextDigest}.`,
     ],
   };
+  run.plan = buildAuditPlan(run, config.tokenBudget);
+  run.notes.push(`Workflow plan: ${run.plan.tasks.length} tasks, ${run.plan.allocatedTokens}/${run.plan.tokenBudget} investigation tokens allocated.`);
 
   const artifactDir = path.resolve(options.output, runId);
   await persistRunArtifacts(artifactDir, run);
@@ -226,6 +236,7 @@ export function summarizeRun(run: AuditRun, options: { findingIds?: string[] } =
     `Mode: ${run.mode}  Files: ${run.files.length}  Obligations: ${run.obligations.length}`,
     `Findings: ${countText || "none"}`,
     `Tokens: ${run.tokenAccounting.inputTokens} in / ${run.tokenAccounting.outputTokens} out (source=${run.tokenAccounting.source})`,
+    planSummary(run.plan),
   ];
   for (const finding of visibleFindings) {
     const location = finding.locations[0];
@@ -243,12 +254,16 @@ export async function persistRunArtifacts(artifactDir: string, run: AuditRun): P
   await writeJson(path.join(artifactDir, "run.json"), run);
   await writeJson(path.join(artifactDir, "findings.json"), run.findings);
   await writeJson(path.join(artifactDir, "obligations.json"), run.obligations);
+  if (run.recon) await writeJson(path.join(artifactDir, "recon.json"), run.recon);
+  if (run.plan) await writeJson(path.join(artifactDir, "plan.json"), run.plan);
   await writeJson(path.join(artifactDir, "manifest.json"), {
     schemaVersion: 1,
     runId: run.runId,
     files: run.files,
     snapshot: run.snapshot,
     coverage: run.coverage,
+    recon: run.recon,
+    plan: run.plan,
     semanticDelta: run.semanticDelta,
     reportableFindingIds: run.reportableFindingIds,
     playbook: run.playbook,

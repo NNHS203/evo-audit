@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -10,7 +10,7 @@ import { defaultPlaybook } from "../src/playbook.js";
 import { buildResumePlan } from "../src/resume.js";
 import { toSarif } from "../src/sarif.js";
 import type { AuditRun } from "../src/types.js";
-import { applyValidationResult, assertWorkspaceMatchesSnapshot } from "../src/validator.js";
+import { applyValidationResult, assertWorkspaceMatchesSnapshot, validateResultAgainstRun } from "../src/validator.js";
 import { mergeWorkerResult } from "../src/workers.js";
 
 test("candidate detection masks fixtures, comments, and descriptions but keeps code", () => {
@@ -59,6 +59,40 @@ test("run persists replayable evidence artifacts", async () => {
   const persisted = await readJson<AuditRun>(path.join(artifactDir, "run.json"));
   assert.equal(persisted.runId, run.runId);
   assert.equal((await readFile(path.join(artifactDir, "manifest.json"), "utf8")).includes(run.runId), true);
+  assert.equal((await readFile(path.join(artifactDir, "recon.json"), "utf8")).includes("contextDigest"), true);
+  assert.equal((await readFile(path.join(artifactDir, "plan.json"), "utf8")).includes("tokenBudget"), true);
+});
+
+test("recon builds bounded graph context and the plan enforces the worker token budget", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-plan-"));
+  await initWorkspace(root);
+  await mkdir(path.join(root, "src"), { recursive: true });
+  await writeFile(path.join(root, "package.json"), JSON.stringify({ scripts: { test: "node --test", build: "tsc" } }), "utf8");
+  await writeFile(path.join(root, "src", "route.ts"), 'import { run } from "./danger.js";\nexport function route(req) { return run(req); }\n', "utf8");
+  await writeFile(path.join(root, "src", "danger.ts"), "export function run(req) { return eval(req.body.code); }\n", "utf8");
+
+  const config = JSON.parse(await readFile(path.join(root, "audit.config.json"), "utf8")) as { tokenBudget: number };
+  config.tokenBudget = 900;
+  await writeFile(path.join(root, "audit.config.json"), `${JSON.stringify(config)}\n`, "utf8");
+
+  const { run } = await runAudit(root, { output: path.join(root, "runs") });
+  assert.equal(run.recon?.projectKind, "NODE_TYPESCRIPT");
+  assert.equal(run.recon?.manifests.includes("package.json"), true);
+  assert.equal(run.recon?.moduleGraph.edges.some((edge) => edge.from === "src/route.ts" && edge.to === "src/danger.ts"), true);
+  assert.equal(run.coverage.semantic, "STATIC_ONLY");
+  assert.equal(run.plan?.tokenBudget, 900);
+  assert.equal((run.plan?.allocatedTokens ?? 0) <= 900, true);
+  assert.equal(run.plan?.tasks.some((task) => task.phase === "INVESTIGATE" && task.context.files.some((file) => file.path === "src/route.ts")), true);
+  assert.equal(run.plan?.tasks.some((task) => task.phase === "VALIDATE" && task.status === "WAITING"), true);
+  assert.equal(run.plan?.tasks.some((task) => task.phase === "HUNT" && task.findingId === null), true);
+
+  const overBudget = mergeWorkerResult(run, {
+    worker: "over-budget-worker",
+    taskId: `investigate:${run.findings[0].id}`,
+    findings: [],
+    tokenAccounting: { inputTokens: 901, outputTokens: 1 },
+  });
+  assert.equal(overBudget.plan?.tasks.find((task) => task.id === `investigate:${run.findings[0].id}`)?.status, "BLOCKED");
 });
 
 test("strict mode does not promote static candidates", async () => {
@@ -100,6 +134,8 @@ test("worker ingestion requires reproducible evidence before VERIFIED", async ()
     ],
   });
   assert.equal(unsupported.findings[0].status, "SUPPORTED");
+  assert.equal(unsupported.plan?.tasks.find((task) => task.phase === "INVESTIGATE" && task.findingId === candidate.id)?.status, "COMPLETED");
+  assert.equal(unsupported.plan?.tasks.find((task) => task.phase === "VALIDATE" && task.findingId === candidate.id)?.status, "PENDING");
 
   const workerClaim = mergeWorkerResult(unsupported, {
     worker: "mock-frontier",
@@ -129,7 +165,7 @@ test("worker ingestion requires reproducible evidence before VERIFIED", async ()
   assert.equal(workerClaim.tokenAccounting.source, "WORKER_REPORTED");
 
   const validation = applyValidationResult(workerClaim, {
-    schemaVersion: 1,
+    schemaVersion: 1 as const,
     validator: "mock-validator",
     requestId: "validation-1",
     runId: workerClaim.runId,
@@ -158,6 +194,7 @@ test("worker ingestion requires reproducible evidence before VERIFIED", async ()
   assert.equal(validation.gate.accepted, true);
   assert.equal(validation.run.findings[0].status, "VERIFIED");
   assert.equal(validation.run.obligations.find((obligation) => obligation.id === candidate.obligationId)?.status, "SATISFIED");
+  assert.equal(validation.run.plan?.tasks.find((task) => task.phase === "VALIDATE" && task.findingId === candidate.id)?.status, "COMPLETED");
 
   const hallucinated = mergeWorkerResult(validation.run, {
     worker: "hallucinating-worker",
@@ -197,6 +234,45 @@ test("baseline runs expose a semantic file delta without narrowing coverage", as
   assert.deepEqual(second.run.semanticDelta.added, ["new.ts"]);
   assert.deepEqual(second.run.semanticDelta.removed, []);
   assert.equal(second.run.files.length, 2);
+});
+
+test("validator independence and evidence locations are enforced", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-validator-boundary-"));
+  await initWorkspace(root);
+  await writeFile(path.join(root, "app.ts"), "export function run(req) { return eval(req.body.code); }\n", "utf8");
+  const initial = await runAudit(root, { output: path.join(root, "runs") });
+  const workerRun = mergeWorkerResult(initial.run, {
+    worker: "mock-worker",
+    findings: [
+      {
+        ruleId: initial.run.findings[0].ruleId,
+        obligationId: initial.run.findings[0].obligationId,
+        title: initial.run.findings[0].title,
+        status: "SUPPORTED",
+        evidenceTier: "T1_STATIC_PATH",
+        locations: initial.run.findings[0].locations,
+      },
+    ],
+  });
+  const valid = {
+    schemaVersion: 1 as const,
+    validator: "independent-validator",
+    requestId: "boundary-1",
+    runId: workerRun.runId,
+    findingId: workerRun.findings[0].id,
+    outcome: "VERIFIED" as const,
+    baseTreeDigest: workerRun.snapshot.treeDigest,
+    sourceFiles: workerRun.files,
+    sandbox: { profile: "READ_ONLY_NO_NETWORK" as const, readOnlySource: true, network: "DENY" as const },
+    reproducer: { command: "reproduce", exitCode: 0, timedOut: false, passed: true, stdoutDigest: "a", stderrDigest: "b" },
+    negativeControl: { command: "negative", exitCode: 1, timedOut: false, passed: true, stdoutDigest: "c", stderrDigest: "d" },
+  };
+  assert.equal(validateResultAgainstRun(workerRun, valid).accepted, true);
+  assert.equal(validateResultAgainstRun(workerRun, { ...valid, validator: "mock-worker" }).accepted, false);
+  assert.equal(validateResultAgainstRun(workerRun, {
+    ...valid,
+    evidence: [{ type: "TRACE", title: "out of scope", detail: "outside", reproducible: false, locations: [{ file: "outside.ts", line: 1, column: 1, endLine: 1, snippet: "outside" }] }],
+  }).accepted, false);
 });
 
 test("validator rejects stale snapshots before a claim can become VERIFIED", async () => {
@@ -240,6 +316,20 @@ test("compare, SARIF, and resume artifacts preserve audit state", async () => {
 
   const comparison = compareRuns(before.run, after.run);
   assert.equal(comparison.findings[0].lifecycle, "RESOLVED");
+  const verifiedBefore = applyValidationResult(before.run, {
+    schemaVersion: 1,
+    validator: "independent-validator",
+    requestId: "compare-validation",
+    runId: before.run.runId,
+    findingId: before.run.findings[0].id,
+    outcome: "VERIFIED",
+    baseTreeDigest: before.run.snapshot.treeDigest,
+    sourceFiles: before.run.files,
+    sandbox: { profile: "READ_ONLY_NO_NETWORK", readOnlySource: true, network: "DENY" },
+    reproducer: { command: "reproduce", exitCode: 0, timedOut: false, passed: true, stdoutDigest: "a", stderrDigest: "b" },
+    negativeControl: { command: "negative", exitCode: 1, timedOut: false, passed: true, stdoutDigest: "c", stderrDigest: "d" },
+  });
+  assert.equal(compareRuns(verifiedBefore.run, after.run).findings[0].lifecycle, "UNKNOWN");
   const sarif = toSarif(before.run) as { runs: Array<{ results: unknown[] }> };
   assert.equal(sarif.runs[0].results.length, 1);
   const plan = buildResumePlan(before.run);
