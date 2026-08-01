@@ -111,7 +111,7 @@ independent runtime validator was supplied.
 
 The reproducible optimized run is [RealVuln v2 optimized aggregate](../benchmark/results/realvuln-v2-aggregate-optimized-20260801.json).
 It uses the same 62 completed repositories, four explicit blocked entries, and
-the same one-to-one scorer, but the `75e9271` scanner revision adds Python
+the same one-to-one scorer, but the `b64d773` scanner revision adds Python
 property/taint semantics, framework-aware policy evidence, GraphQL mutation
 ownership tracing, request-mapping mass-assignment tracing, route-aware Python
 object-ownership tracing, framework-aware authentication throttling boundaries,
@@ -181,7 +181,7 @@ The runner verifies the checkout HEAD, copies it read-only into an isolated
 temporary case workspace, excludes `.git`, dependencies, build output, and
 audit configuration, then records the resulting source tree digest.
 
-The checked-in `framework-holdout` split adds fourteen dependency-free cases
+The checked-in `framework-holdout` split adds sixteen dependency-free cases
 for FastAPI SQL/NoSQL flows, FastAPI and Flask object ownership, Django object
 ownership, Flask uploads, Express command/redirect/object-ownership flows, and safe controls.
 Run it with the pinned manifest:
@@ -193,7 +193,7 @@ evo-audit benchmark ./benchmark/cases \
 ```
 
 The current deterministic observation is candidate precision `1.000`, recall
-`1.000`, and FPR `0.000` on these fourteen cases; it remains a holdout observation,
+`1.000`, and FPR `0.000` on these sixteen cases; it remains a holdout observation,
 and reportable recall is `0.000` until independent validation runs.
 
 ### Independent validator holdout

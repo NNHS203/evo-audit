@@ -21,6 +21,7 @@ import { deduplicateRun } from "../src/dedup.js";
 import { buildRevalidationPlan } from "../src/revalidation.js";
 import { evaluateBenchmark, runBenchmark, type BenchmarkReport } from "../src/benchmark.js";
 import { groundTruthLabelsFromValue, scannerFindingsFromBandit, scannerFindingsFromSarif, scoreScannerFindings } from "../src/scoring.js";
+import { compareBaselineScores } from "../src/baselines.js";
 import { runRealVulnAll } from "../src/realvuln.js";
 
 test("candidate detection masks fixtures, comments, and descriptions but keeps code", () => {
@@ -190,6 +191,19 @@ test("AST graph resolves imported helper chains without linking unrelated same-n
   assert.equal(run.recon?.codeGraph?.flows.length, 1);
   assert.equal(graphFinding.locations.some((location) => location.file === "danger.ts"), true);
   assert.equal(graphFinding.locations.some((location) => location.file === "routes.ts"), true);
+});
+
+test("AST graph does not treat bound query arguments as SQL text", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-graph-bound-query-"));
+  await initWorkspace(root);
+  await writeFile(path.join(root, "safe.js"), "export async function search(req, db) { return db.query('SELECT * FROM users WHERE name = ?', [req.query.name]); }\n", "utf8");
+  await writeFile(path.join(root, "unsafe.js"), "export async function search(req, db) { return db.query(`SELECT * FROM users WHERE name = '${req.query.name}'`); }\n", "utf8");
+
+  const { run } = await runAudit(root, { output: path.join(root, "runs") });
+  const sqlFindings = run.findings.filter((finding) => finding.ruleId === "JS-SQL-INJECTION-001");
+  assert.equal(sqlFindings.length, 1);
+  assert.equal(sqlFindings[0]?.locations.some((location) => location.file === "unsafe.js"), true);
+  assert.equal(sqlFindings[0]?.locations.some((location) => location.file === "safe.js"), false);
 });
 
 test("HUNT completion records unknown coverage and schedules a bounded second pass", async () => {
@@ -847,6 +861,10 @@ test("model-backed benchmark reuses the same bounded worker protocol", async () 
     assert.equal(report.notes.some((note) => /model-backed worker mode/i.test(note)), true);
     assert.equal(report.cases.every((item) => item.tokenTotal > 0), true);
     assert.equal(report.metrics.reportableRecall, 0);
+    assert.equal(report.execution?.requestedModel, "local");
+    assert.equal(report.execution?.providerModels.includes("test"), true);
+    assert.equal(report.execution?.promptHashes.every((hash) => /^[a-f0-9]{64}$/.test(hash)), true);
+    assert.equal(report.execution?.playbooks.some((playbook) => playbook.version === "0.1.1"), true);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
@@ -891,6 +909,38 @@ test("scanner scoring separates candidate and evidence-gated reportable performa
   const collisionScore = scoreScannerFindings(collisionFindings, collisionLabels);
   assert.equal(collisionScore.candidate.truePositive, 2);
   assert.equal(collisionScore.candidate.falsePositive, 0);
+});
+
+test("baseline comparison scores multiple artifact formats against one frozen truth set", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-baseline-compare-"));
+  await initWorkspace(root);
+  await writeFile(path.join(root, "app.ts"), "export function run(req) { return eval(req.body.code); }\n", "utf8");
+  const { run, artifactDir } = await runAudit(root, { output: path.join(root, "runs") });
+  const location = run.findings[0]?.locations[0];
+  assert.ok(location);
+  const truthPath = path.join(root, "ground-truth.json");
+  await writeFile(truthPath, JSON.stringify({ labels: [{ id: "dynamic-code", vulnerable: true, file: location.file, startLine: location.line, endLine: location.endLine, ruleIds: ["JS-DYNAMIC-CODE-001"] }] }), "utf8");
+  const sarifPath = path.join(root, "external.sarif");
+  await writeFile(sarifPath, JSON.stringify({
+    version: "2.1.0",
+    runs: [{ tool: { driver: { name: "fixture-sarif" } }, results: [{
+      ruleId: "JS-DYNAMIC-CODE-001",
+      locations: [{ physicalLocation: { artifactLocation: { uri: location.file }, region: { startLine: location.line, endLine: location.endLine } } }],
+      properties: { reportable: true },
+    }] }],
+  }), "utf8");
+  const report = await compareBaselineScores(truthPath, [
+    { name: "evo", file: path.join(artifactDir, "run.json"), format: "run" },
+    { name: "sarif", file: sarifPath, format: "sarif" },
+  ], { lineTolerance: 0 });
+  assert.deepEqual(report.artifacts.map((item) => item.name), ["evo", "sarif"]);
+  assert.equal(report.benchmark.labels, 1);
+  assert.equal(report.artifacts[0]?.score.candidate.recall, 1);
+  assert.equal(report.artifacts[0]?.score.reportable.recall, 0);
+  assert.equal(report.artifacts[1]?.score.reportable.recall, 1);
+  assert.match(report.artifacts[0]?.provenance.artifactSha256 ?? "", /^[a-f0-9]{64}$/);
+  assert.equal(report.artifacts[0]?.provenance.snapshotTreeDigest, run.snapshot.treeDigest);
+  assert.match(report.benchmark.groundTruthSha256, /^[a-f0-9]{64}$/);
 });
 
 test("RealVuln aggregate records malformed manifest entries as blocked", async () => {

@@ -338,14 +338,20 @@ function analyzeFile(builder: GraphBuilder, file: FileFingerprint, content: stri
       const name = callName(node.expression);
       const callNodeId = addNode(builder, sourceFile, node, "CALL", name, "Call expression discovered by the AST graph.");
       addEdge(builder, { from: active.functionNodeId, to: callNodeId, kind: "CALLS", confidence: "MEDIUM", label: name });
-      const origins = node.arguments.flatMap((argument) => sourceOriginsIn(builder, sourceFile, argument, active));
+      const kind = sinkKind(name);
+      // Query APIs carry user values in bind parameters. Only the query
+      // expression itself is a SQL-injection sink; treating every argument as
+      // query text creates a systematic false positive for parameterized SQL.
+      const flowArguments = kind === "QUERY_EXECUTION" && node.arguments.length > 1
+        ? [node.arguments[0]]
+        : node.arguments;
+      const origins = flowArguments.flatMap((argument) => sourceOriginsIn(builder, sourceFile, argument, active));
       const uniqueOrigins = [...new Set(origins)];
       if (isGuardCall(name)) {
         const guardId = addNode(builder, sourceFile, node, "GUARD", name, "Potential sanitizer, authorization, validation, or boundary guard.");
         active.controls.push(guardId);
         addEdge(builder, { from: guardId, to: active.functionNodeId, kind: "GUARDS", confidence: "MEDIUM", label: name });
       }
-      const kind = sinkKind(name);
       if (kind) {
         const sinkId = addNode(builder, sourceFile, node, "SINK", name, kind);
         addEdge(builder, { from: callNodeId, to: sinkId, kind: "CONTAINS", confidence: "HIGH", label: kind });
@@ -448,7 +454,10 @@ function analyzeInterprocedural(builder: GraphBuilder, files: FileFingerprint[],
         const kind = sinkKind(name);
         if (kind) {
           const sinkId = addNode(builder, sourceFile, node, "SINK", name, kind);
-          if (active.summary) active.summary.sinks.push({ sinkNodeId: sinkId, parameterNames: [...new Set(argumentParameters.flat())] });
+          const sinkArguments = kind === "QUERY_EXECUTION" && node.arguments.length > 1
+            ? argumentParameters.slice(0, 1)
+            : argumentParameters;
+          if (active.summary) active.summary.sinks.push({ sinkNodeId: sinkId, parameterNames: [...new Set(sinkArguments.flat())] });
         } else if (name && !isGuardCall(name)) {
           const parts = name.split(".");
           const binding = imports.get(parts[0]);

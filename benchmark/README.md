@@ -80,6 +80,22 @@ they are not a claim of real-world vulnerability recall. A later model-backed
 runner must preserve the same case IDs and add validator evidence before
 reporting validated metrics.
 
+For a directly comparable table across scanners, use the same frozen labels
+for every artifact:
+
+```bash
+evo-audit compare-scores ./ground-truth.json \
+  --input evo:run=./audit-runs/<run>/run.json \
+  --input semgrep:sarif=./semgrep.sarif \
+  --input bandit=./bandit.json --root bandit=./pinned-project \
+  --output ./baseline-comparison.json
+```
+
+The command records SHA-256 hashes for the labels and artifacts. Evo Audit run
+artifacts additionally retain snapshot tree digest, revision, playbook, model
+receipt, coverage, token, and latency provenance. External SARIF/Bandit output
+is never upgraded to validated evidence merely because it has a finding.
+
 The `validator` split is intentionally separate from discovery CI. Its
 acceptance gate requires an actual `VERIFIED` finding with
 `reportableRecall=1`; unavailable Docker/Podman produces `BLOCKED` and fails
@@ -104,6 +120,12 @@ model/request provenance and a prompt hash. Worker source/evidence locations
 must match the pinned file content, and unknown rule IDs are quarantined as
 `UNKNOWN`. None of this turns worker output into a reportable vulnerability: a
 separate validator run is required for `T2_REPRODUCIBLE` evidence.
+
+Every benchmark report also retains an `execution` provenance block and per-case
+provenance: requested model, provider model IDs, playbook versions, worker
+receipt/request IDs, prompt hashes, cache hits, token totals, latency, and
+validator outcome. Prompt contents and credentials are not written to the
+artifact.
 
 Cases may declare a `validation` block with a `findingRuleId`, positive
 `reproducerCommand`, negative control, timeout, and container image. With

@@ -15,6 +15,7 @@ import { evaluateBenchmark, runBenchmark } from "./benchmark.js";
 import { buildRevalidationPlan } from "./revalidation.js";
 import { groundTruthLabelsFromValue, scannerFindingsFromBandit, scannerFindingsFromRun, scannerFindingsFromSarif, scoreScannerFindings, type GroundTruthFormat } from "./scoring.js";
 import { runRealVuln, runRealVulnAll } from "./realvuln.js";
+import { compareBaselineScores, type BaselineArtifactFormat, type BaselineArtifactInput } from "./baselines.js";
 import type { AuditRun, AuditWorkerResult, ValidationResult } from "./types.js";
 
 function usage(): string {
@@ -35,6 +36,8 @@ Commands:
   compare <before.json> <after.json> Compare findings by root cause across runs
   revalidate <before.json> <after.json> Build a fix/regression validation plan
   score <ground-truth.json> <run/sarif/bandit> Score normalized scanner output
+  compare-scores <ground-truth.json> --input name=artifact.json
+                                      Compare multiple scanners on one frozen truth set
   plan <run.json> [--json]            Show prioritized investigation/validation tasks
   status <run.json>                   Show coverage and pending obligations
   resume <run.json> [--output FILE]   Write a resumable pending-work plan
@@ -68,6 +71,31 @@ function numberFlag(args: string[], name: string): number | undefined {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) throw new Error(`${name} requires a numeric value.`);
   return parsed;
+}
+
+function repeatedFlag(args: string[], name: string): string[] {
+  const values: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === name) {
+      const value = args[index + 1];
+      if (!value) throw new Error(`${name} requires a value.`);
+      values.push(value);
+      index += 1;
+    }
+  }
+  return values;
+}
+
+function parseBaselineInput(spec: string, roots: Map<string, string>): BaselineArtifactInput {
+  const equals = spec.indexOf("=");
+  if (equals <= 0 || equals === spec.length - 1) throw new Error(`Invalid --input ${spec}; use name=artifact.json or name:format=artifact.json.`);
+  const descriptor = spec.slice(0, equals);
+  const file = spec.slice(equals + 1);
+  const separator = descriptor.indexOf(":");
+  const name = separator >= 0 ? descriptor.slice(0, separator) : descriptor;
+  const format = separator >= 0 ? descriptor.slice(separator + 1) : undefined;
+  if (format && !["run", "sarif", "bandit"].includes(format)) throw new Error(`Invalid scanner format in --input ${spec}; use run, sarif, or bandit.`);
+  return { name, file, ...(format ? { format: format as BaselineArtifactFormat } : {}), ...(roots.has(name) ? { root: roots.get(name) } : {}) };
 }
 
 async function main(): Promise<void> {
@@ -190,6 +218,43 @@ async function main(): Promise<void> {
       console.log(`Candidate: precision=${score.candidate.precision.toFixed(3)} recall=${score.candidate.recall.toFixed(3)} false-positive-rate=${score.candidate.falsePositiveRate.toFixed(3)} F3=${score.candidate.f3.toFixed(3)}`);
       console.log(`Reportable: precision=${score.reportable.precision.toFixed(3)} recall=${score.reportable.recall.toFixed(3)} false-positive-rate=${score.reportable.falsePositiveRate.toFixed(3)} F3=${score.reportable.f3.toFixed(3)} tokens/validated=${score.reportable.tokensPerValidatedFinding ?? "n/a"}`);
       console.log(`Unsupported claims: ${score.unsupportedClaimCount} (${score.unsupportedClaimRate.toFixed(3)})  latency=${score.durationMs}ms`);
+    }
+    return;
+  }
+
+  if (command === "compare-scores") {
+    if (!input) throw new Error("compare-scores requires a ground-truth.json");
+    const rootByScanner = new Map<string, string>();
+    for (const spec of repeatedFlag(args, "--root")) {
+      const equals = spec.indexOf("=");
+      if (equals <= 0 || equals === spec.length - 1) throw new Error(`Invalid --root ${spec}; use scanner=path.`);
+      const scanner = spec.slice(0, equals);
+      if (rootByScanner.has(scanner)) throw new Error(`Duplicate --root for scanner: ${scanner}`);
+      rootByScanner.set(scanner, spec.slice(equals + 1));
+    }
+    const inputs = repeatedFlag(args, "--input").map((spec) => parseBaselineInput(spec, rootByScanner)).map((item) => ({
+      ...item,
+      file: path.resolve(cwd, item.file),
+      ...(item.root ? { root: path.resolve(cwd, item.root) } : {}),
+    }));
+    const groundTruthFormat = valueFlag(args, "--ground-truth-format", "evo").toUpperCase();
+    if (groundTruthFormat !== "EVO" && groundTruthFormat !== "REALVULN") throw new Error("--ground-truth-format must be evo or realvuln.");
+    const report = await compareBaselineScores(path.resolve(cwd, input), inputs, {
+      groundTruthFormat: groundTruthFormat as GroundTruthFormat,
+      lineTolerance: numberFlag(args, "--line-tolerance"),
+    });
+    const output = valueFlag(args, "--output", "");
+    if (output) await writeJson(path.resolve(cwd, output), report);
+    if (flag(args, "--json")) console.log(JSON.stringify(report, null, 2));
+    else {
+      console.log(`Baseline comparison: labels=${report.benchmark.labels} vulnerable=${report.benchmark.vulnerableLabels} safe=${report.benchmark.safeLabels} tolerance=±${report.benchmark.lineTolerance}`);
+      console.log("Scanner                 Candidate P  Candidate R  FPR      F3       Reportable R  Tokens/validated  Latency");
+      for (const entry of report.artifacts) {
+        const candidate = entry.score.candidate;
+        const reportable = entry.score.reportable;
+        console.log(`${entry.name.padEnd(23)} ${candidate.precision.toFixed(3).padEnd(13)} ${candidate.recall.toFixed(3).padEnd(13)} ${candidate.falsePositiveRate.toFixed(3).padEnd(8)} ${candidate.f3.toFixed(3).padEnd(8)} ${reportable.recall.toFixed(3).padEnd(14)} ${String(reportable.tokensPerValidatedFinding ?? "n/a").padEnd(17)} ${entry.score.durationMs}ms`);
+      }
+      if (output) console.log(`Report: ${path.resolve(cwd, output)}`);
     }
     return;
   }

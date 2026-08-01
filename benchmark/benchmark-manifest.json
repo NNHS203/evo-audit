@@ -187,6 +187,18 @@
       "caseId": "framework-express-safe-idor-001",
       "split": "framework-holdout",
       "sha256": "6b09ac8b8f2d7bfd1e79b2162e8412e2a522877f2d6034fce7e936d9e90efcf6"
+    },
+    {
+      "file": "cases/js-express-sql-001.json",
+      "caseId": "framework-express-sql-001",
+      "split": "framework-holdout",
+      "sha256": "563c1035a9ec801bc93b2187b85623e0b4c6e891dbd09c36ba182ec95ceb4d18"
+    },
+    {
+      "file": "cases/js-express-safe-sql-001.json",
+      "caseId": "framework-express-safe-sql-001",
+      "split": "framework-holdout",
+      "sha256": "de006951abc68ac925af8310744cabed01b92f62eee34e325de25c9cbc8045bc"
     }
   ],
   "notes": [

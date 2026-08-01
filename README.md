@@ -85,6 +85,14 @@ evo-audit score ./realvuln-ground-truth.json ./external.sarif \
 evo-audit score ./realvuln-ground-truth.json ./bandit.json \
   --format bandit --root ./pinned-project --ground-truth-format realvuln
 
+# Compare multiple scanners on exactly the same frozen labels. Repeat --input;
+# use name:format=path when format inference is ambiguous.
+evo-audit compare-scores ./ground-truth.json \
+  --input evo:run=./audit-runs/<run>/run.json \
+  --input semgrep:sarif=./semgrep.sarif \
+  --input bandit=./bandit.json --root bandit=./pinned-project \
+  --output ./benchmark-comparison.json
+
 # Reproduce one pinned RealVuln v2.0 repository after cloning its benchmark.
 evo-audit realvuln ./Real-Vuln-Benchmark \
   realvuln-damn-vulnerable-flask-application --output ./realvuln-runs
@@ -111,6 +119,13 @@ evo-audit worker ./audit-runs/<run>/run.json --all --concurrency 2
 Reports support `text`, `json`, and `sarif` formats. SARIF results include
 stable root-cause fingerprints so downstream code-scanning systems can track
 findings even when line numbers move.
+
+`compare-scores` is the reproducible baseline layer. It freezes the ground-truth
+hash and line tolerance, normalizes Evo Audit runs, SARIF, and Bandit JSON, and
+retains each artifact hash plus run snapshot/playbook/model-receipt provenance
+when available. It prints candidate precision/recall/FPR/F3 separately from
+reportable recall and tokens per validated finding; it does not infer a clean
+result from a missing scanner finding.
 
 ## Token usage
 

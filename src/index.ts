@@ -21,3 +21,4 @@ export * from "./revalidation.js";
 export * from "./scoring.js";
 export * from "./realvuln.js";
 export * from "./python-graph.js";
+export * from "./baselines.js";

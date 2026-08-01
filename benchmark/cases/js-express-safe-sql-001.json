@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "caseId": "framework-express-safe-sql-001",
+  "split": "framework-holdout",
+  "language": "javascript",
+  "files": [
+    {
+      "path": "server/search.js",
+      "code": "app.get('/search', async (req, res) => {\n  return res.json(await db.query('SELECT * FROM users WHERE name = ?', [req.query.name]));\n});\n"
+    }
+  ],
+  "property": "An Express-style query binds request data as a parameter instead of interpolating it.",
+  "expected": { "vulnerable": false, "ruleId": "JS-SQL-INJECTION-001" },
+  "notes": ["Negative control for explicit database parameter binding."]
+}

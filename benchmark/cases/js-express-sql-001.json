@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "caseId": "framework-express-sql-001",
+  "split": "framework-holdout",
+  "language": "javascript",
+  "files": [
+    {
+      "path": "server/search.js",
+      "code": "app.get('/search', async (req, res) => {\n  return res.json(await db.query(`SELECT * FROM users WHERE name = '${req.query.name}'`));\n});\n"
+    }
+  ],
+  "property": "An Express-style query embeds request data in a database execution call.",
+  "expected": { "vulnerable": true, "ruleId": "JS-SQL-INJECTION-001" },
+  "notes": ["Framework holdout: direct query interpolation must remain a candidate."]
+}

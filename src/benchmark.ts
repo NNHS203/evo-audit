@@ -64,6 +64,15 @@ export interface BenchmarkCaseResult {
   sourceRevision?: string;
   sourceTreeDigest: string;
   validationOutcome?: ValidationResult["outcome"];
+  provenance?: {
+    playbook: AuditRun["playbook"];
+    providerModels: string[];
+    workerIds: string[];
+    requestIds: string[];
+    promptHashes: string[];
+    receiptIds: string[];
+    cacheHits: number;
+  };
   runId: string;
 }
 
@@ -116,6 +125,16 @@ export interface BenchmarkReport {
     tokensPerCase: number;
     tokensPerValidatedFinding: number | null;
     durationMsPerCase: number;
+  };
+  execution?: {
+    requestedModel?: string;
+    playbooks: Array<{ id: string; version: string }>;
+    providerModels: string[];
+    workerIds: string[];
+    requestIds: string[];
+    promptHashes: string[];
+    receiptIds: string[];
+    cacheHits: number;
   };
   notes: string[];
 }
@@ -276,6 +295,7 @@ async function runCase(item: BenchmarkCase, casesDirectory: string, options: Ben
     const reportableIds = new Set(run.reportableFindingIds ?? []);
     const reportableFinding = run.findings.some((finding) => reportableIds.has(finding.id) && (!item.expected.ruleId || finding.ruleId === item.expected.ruleId));
     const unsupportedClaim = run.findings.some((finding) => finding.status === "VERIFIED" && finding.evidenceTier !== "T2_REPRODUCIBLE");
+    const receipts = run.workerReceipts ?? [];
     return {
       caseId: item.caseId,
       split: item.split,
@@ -294,6 +314,15 @@ async function runCase(item: BenchmarkCase, casesDirectory: string, options: Ben
       sourceRevision,
       sourceTreeDigest: run.snapshot.treeDigest,
       validationOutcome,
+      provenance: {
+        playbook: run.playbook,
+        providerModels: [...new Set(receipts.map((receipt) => receipt.providerModel).filter((model): model is string => typeof model === "string" && model.length > 0))].sort(),
+        workerIds: [...new Set(receipts.map((receipt) => receipt.worker).filter((worker): worker is string => typeof worker === "string" && worker.length > 0))].sort(),
+        requestIds: [...new Set(receipts.map((receipt) => receipt.modelRequestId).filter((requestId): requestId is string => typeof requestId === "string" && requestId.length > 0))].sort(),
+        promptHashes: [...new Set(receipts.map((receipt) => receipt.promptHash).filter((hash): hash is string => typeof hash === "string" && hash.length > 0))].sort(),
+        receiptIds: receipts.map((receipt) => receipt.receiptId).sort(),
+        cacheHits: receipts.filter((receipt) => receipt.cacheHit === true).length,
+      },
       runId: run.runId,
     };
   } finally {
@@ -319,6 +348,9 @@ export async function runBenchmark(directory: string, split?: string, options: B
   const unknown = results.filter((item) => item.coverageUnknown);
   const safeDenominator = results.length - expected.length;
   const tokenTotal = results.reduce((sum, item) => sum + item.tokenTotal, 0);
+  const provenances = results.map((item) => item.provenance).filter((item): item is NonNullable<BenchmarkCaseResult["provenance"]> => item !== undefined);
+  const playbooks = [...new Map(provenances.map((item) => [`${item.playbook.id}@${item.playbook.version}`, item.playbook])).values()]
+    .sort((left, right) => `${left.id}@${left.version}`.localeCompare(`${right.id}@${right.version}`));
   return {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
@@ -338,6 +370,16 @@ export async function runBenchmark(directory: string, split?: string, options: B
       tokensPerCase: tokenTotal / results.length,
       tokensPerValidatedFinding: results.filter((item) => item.reportableFinding).length === 0 ? null : tokenTotal / results.filter((item) => item.reportableFinding).length,
       durationMsPerCase: results.reduce((sum, item) => sum + item.durationMs, 0) / results.length,
+    },
+    execution: {
+      ...(options.model ? { requestedModel: options.model } : {}),
+      playbooks,
+      providerModels: [...new Set(provenances.flatMap((item) => item.providerModels))].sort(),
+      workerIds: [...new Set(provenances.flatMap((item) => item.workerIds))].sort(),
+      requestIds: [...new Set(provenances.flatMap((item) => item.requestIds))].sort(),
+      promptHashes: [...new Set(provenances.flatMap((item) => item.promptHashes))].sort(),
+      receiptIds: [...new Set(provenances.flatMap((item) => item.receiptIds))].sort(),
+      cacheHits: provenances.reduce((sum, item) => sum + item.cacheHits, 0),
     },
     notes: [
       "This runner measures deterministic candidate discovery; it does not claim production vulnerability recall.",

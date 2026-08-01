@@ -420,6 +420,14 @@ function findMatch(rule: PlaybookRule, line: string, rawLine = line, relativePat
     /\.(?:query|execute|raw)\s*\([^)]*/.test(line) &&
     new RegExp(requestInput + "|\\$\\{", "i").test(line)
   ) {
+    const queryIndex = rawLine.search(/\.(?:query|execute|raw)\s*\(/i);
+    const queryArguments = queryIndex >= 0 ? callArgumentText(rawLine, queryIndex) : "";
+    // A request value in a second parameter is data when the first argument
+    // is a literal query and the driver receives an explicit bind array. Keep
+    // this narrow: helper-built SQL, template interpolation, and object-shaped
+    // options still require an investigation/validator path.
+    if (/^\s*(?:'[^']*'|"[^"]*"|`[^`${}]*`)\s*,\s*\[[\s\S]*\]\s*$/.test(queryArguments)
+      || /\.(?:query|execute|raw)\s*\(\s*['"`][^'"`]*\?[^'"`]*['"`]\s*,\s*\[/.test(rawLine)) return null;
     return {
       rootCause: "A query execution call appears to receive request-controlled or interpolated data.",
       impact: "An attacker may alter query semantics if parameterization is not enforced.",
