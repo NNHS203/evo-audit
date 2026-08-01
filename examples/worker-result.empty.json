@@ -1,0 +1,13 @@
+{
+  "worker": "example-frontier-adapter",
+  "findings": [],
+  "tokenAccounting": {
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "cachedTokens": 0,
+    "estimatedCostUsd": 0
+  },
+  "notes": [
+    "Example adapter result: an empty result is not a proof of safety."
+  ]
+}

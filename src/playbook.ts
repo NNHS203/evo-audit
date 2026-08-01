@@ -1,0 +1,63 @@
+import type { AuditPlaybook, AuditConfig, PlaybookRule } from "./types.js";
+
+export const defaultConfig: AuditConfig = {
+  schemaVersion: 1,
+  ignore: ["node_modules", ".git", "dist", "build", "coverage", "audit-runs"],
+  includeExtensions: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"],
+  playbook: "audit.playbook.json",
+  tokenBudget: 12000,
+};
+
+const defaultRules: PlaybookRule[] = [
+  {
+    id: "JS-DYNAMIC-CODE-001",
+    title: "Dynamic code execution from a JavaScript/TypeScript call site",
+    description:
+      "eval() and new Function() create a code execution boundary. Reachability and input control must be verified before this can be reported as a vulnerability.",
+    severity: "CRITICAL",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx", "**/*.mjs", "**/*.cjs"],
+    enabled: true,
+  },
+  {
+    id: "JS-COMMAND-INJECTION-001",
+    title: "Request or user input reaches a command execution API",
+    description:
+      "A request-controlled value appears in a child_process execution call. A verifier must prove attacker reachability and command impact.",
+    severity: "CRITICAL",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx", "**/*.mjs", "**/*.cjs"],
+    enabled: true,
+  },
+  {
+    id: "JS-OPEN-REDIRECT-001",
+    title: "Request-controlled redirect target",
+    description:
+      "A redirect target appears to use request-controlled data. Verify whether an allowlist or same-origin constraint exists.",
+    severity: "HIGH",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx", "**/*.mjs", "**/*.cjs"],
+    enabled: true,
+  },
+  {
+    id: "JS-SQL-INJECTION-001",
+    title: "Request-controlled value reaches a query execution call",
+    description:
+      "A request-controlled value appears in a query or execute call. Parameterization and actual reachability must be verified.",
+    severity: "HIGH",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx", "**/*.mjs", "**/*.cjs"],
+    enabled: true,
+  },
+];
+
+export const defaultPlaybook: AuditPlaybook = {
+  schemaVersion: 1,
+  id: "evo-audit-default",
+  version: "0.1.0",
+  evidencePolicy: {
+    reportableTiers: ["T2_REPRODUCIBLE"],
+    neverTreatNoMatchAsSafe: true,
+  },
+  rules: defaultRules,
+};

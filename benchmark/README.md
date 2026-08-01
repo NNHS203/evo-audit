@@ -1,0 +1,30 @@
+# Evo Audit benchmark protocol
+
+This directory is a format and evaluation contract, not a claimed score.
+Cases should be split before tuning into `train`, `development`, and
+`holdout`; the holdout must not be used to evolve a playbook.
+
+Each case records:
+
+- the code snapshot and its provenance;
+- the expected security property, root cause, and impact;
+- required evidence for a reportable result;
+- negative controls and known ambiguities;
+- token and wall-clock budgets.
+
+The primary metrics are deliberately separate:
+
+1. report precision: how many reported findings survive human verification;
+2. obligation recall: how many expected security obligations are opened;
+3. closure recall: how many expected obligations reach reproducible T2 evidence;
+4. unsupported-claim rate: how often a worker claims `VERIFIED` without a
+   reproducible reproducer;
+5. token efficiency: input/output tokens per closed obligation.
+
+An empty report is not a pass. A case is only closed when the audit artifact
+contains the required evidence and a negative control where applicable.
+
+The intended research loop is: run a frozen playbook on train cases, propose a
+reviewable playbook revision, evaluate it on development cases, then report
+once on holdout. This makes improvements in the audit procedure measurable
+instead of conflating them with a larger model or a longer prompt.

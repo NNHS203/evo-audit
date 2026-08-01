@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "ignore": [
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    "coverage",
+    "audit-runs"
+  ],
+  "includeExtensions": [
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs"
+  ],
+  "playbook": "audit.playbook.json",
+  "tokenBudget": 12000
+}

@@ -1,0 +1,231 @@
+import { createHash, randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { promises as fs } from "node:fs";
+import path from "node:path";
+import { defaultConfig, defaultPlaybook } from "./playbook.js";
+import { detectFindings } from "./detectors.js";
+import type {
+  AuditConfig,
+  AuditObligation,
+  AuditPlaybook,
+  AuditRun,
+  SemanticDelta,
+  FileFingerprint,
+  Finding,
+} from "./types.js";
+
+export async function pathExists(target: string): Promise<boolean> {
+  try {
+    await fs.access(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function readJson<T>(file: string): Promise<T> {
+  return JSON.parse(await fs.readFile(file, "utf8")) as T;
+}
+
+export async function writeJson(file: string, value: unknown): Promise<void> {
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+export async function initWorkspace(root: string): Promise<void> {
+  await fs.mkdir(root, { recursive: true });
+  const configPath = path.join(root, "audit.config.json");
+  const playbookPath = path.join(root, defaultConfig.playbook);
+  if (!(await pathExists(configPath))) await writeJson(configPath, defaultConfig);
+  if (!(await pathExists(playbookPath))) await writeJson(playbookPath, defaultPlaybook);
+}
+
+function shouldIgnore(relativePath: string, config: AuditConfig): boolean {
+  const pieces = relativePath.split(/[\\/]/g);
+  return config.ignore.some((entry) => pieces.includes(entry) || relativePath.startsWith(`${entry}/`));
+}
+
+async function walk(root: string, current: string, config: AuditConfig, output: string[]): Promise<void> {
+  const entries = await fs.readdir(current, { withFileTypes: true });
+  for (const entry of entries) {
+    const absolute = path.join(current, entry.name);
+    const relative = path.relative(root, absolute).split(path.sep).join("/");
+    if (shouldIgnore(relative, config)) continue;
+    if (entry.isDirectory()) {
+      await walk(root, absolute, config, output);
+      continue;
+    }
+    const extension = path.extname(entry.name).toLowerCase();
+    if (config.includeExtensions.includes(extension)) output.push(relative);
+  }
+}
+
+export async function discoverFiles(root: string, config: AuditConfig): Promise<string[]> {
+  const output: string[] = [];
+  await walk(root, root, config, output);
+  return output.sort();
+}
+
+function sha256(buffer: Buffer): string {
+  return createHash("sha256").update(buffer).digest("hex");
+}
+
+function gitValue(root: string, args: string[]): string | null {
+  try {
+    return execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function gitMode(root: string): AuditRun["mode"] {
+  return gitValue(root, ["rev-parse", "--is-inside-work-tree"]) === "true" ? "WORKTREE" : "PATH";
+}
+
+export async function loadConfig(root: string): Promise<AuditConfig> {
+  const file = path.join(root, "audit.config.json");
+  return (await pathExists(file)) ? readJson<AuditConfig>(file) : defaultConfig;
+}
+
+export async function loadPlaybook(root: string, config: AuditConfig): Promise<AuditPlaybook> {
+  const file = path.join(root, config.playbook);
+  return (await pathExists(file)) ? readJson<AuditPlaybook>(file) : defaultPlaybook;
+}
+
+function relativeToRoot(root: string, file: string): string {
+  return path.relative(root, file).split(path.sep).join("/");
+}
+
+function computeSemanticDelta(files: FileFingerprint[], baseline: AuditRun | undefined): SemanticDelta {
+  if (!baseline) {
+    return {
+      basis: "FULL_SCAN",
+      changed: files.map((file) => file.path),
+      added: [],
+      removed: [],
+      unchanged: [],
+      workerHint: "No baseline was supplied; prioritize all in-scope files and do not infer safety from an empty finding set.",
+    };
+  }
+
+  const previous = new Map(baseline.files.map((file) => [file.path, file.sha256]));
+  const current = new Map(files.map((file) => [file.path, file.sha256]));
+  const changed: string[] = [];
+  const added: string[] = [];
+  const unchanged: string[] = [];
+  const removed = [...previous.keys()].filter((file) => !current.has(file)).sort();
+
+  for (const file of files) {
+    const oldHash = previous.get(file.path);
+    if (oldHash === undefined) added.push(file.path);
+    else if (oldHash === file.sha256) unchanged.push(file.path);
+    else changed.push(file.path);
+  }
+
+  return {
+    basis: "BASELINE_RUN",
+    changed: changed.sort(),
+    added: added.sort(),
+    removed,
+    unchanged: unchanged.sort(),
+    workerHint: "Use changed and added files to prioritize model context, then expand to importers and shared boundaries before closing obligations.",
+  };
+}
+
+export async function runAudit(rootInput: string, options: { output: string; strict?: boolean; baseline?: AuditRun }): Promise<{ run: AuditRun; artifactDir: string }> {
+  const root = path.resolve(rootInput);
+  const config = await loadConfig(root);
+  const playbook = await loadPlaybook(root, config);
+  const runId = randomUUID();
+  const startedAt = new Date().toISOString();
+  const relativeFiles = await discoverFiles(root, config);
+  const files: FileFingerprint[] = [];
+  const allFindings: Finding[] = [];
+  const allObligations: AuditObligation[] = [];
+
+  for (const relative of relativeFiles) {
+    const buffer = await fs.readFile(path.join(root, relative));
+    files.push({ path: relative, sha256: sha256(buffer), bytes: buffer.byteLength });
+    const content = buffer.toString("utf8");
+    const result = detectFindings(relative, content, playbook, runId);
+    allFindings.push(...result.findings);
+    allObligations.push(...result.obligations);
+  }
+
+  const findings = options.strict
+    ? allFindings.filter((finding) => playbook.evidencePolicy.reportableTiers.includes(finding.evidenceTier) && finding.status === "VERIFIED")
+    : allFindings;
+  const semanticDelta = computeSemanticDelta(files, options.baseline);
+  const completedAt = new Date().toISOString();
+  const run: AuditRun = {
+    schemaVersion: 1,
+    runId,
+    startedAt,
+    completedAt,
+    root,
+    baseline: gitValue(root, ["rev-parse", "HEAD~1"]),
+    head: gitValue(root, ["rev-parse", "HEAD"]),
+    mode: gitMode(root),
+    playbook: { id: playbook.id, version: playbook.version },
+    files,
+    semanticDelta,
+    obligations: allObligations,
+    findings,
+    tokenAccounting: {
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
+      estimatedCostUsd: 0,
+      source: "DETERMINISTIC",
+    },
+    notes: [
+      "This run used only deterministic static detectors.",
+      "SUSPECTED and SUPPORTED findings require an execution-capable worker before they can be reported as VERIFIED.",
+      "No finding is evidence that untested code is safe.",
+      `Semantic delta basis: ${semanticDelta.basis}; changed=${semanticDelta.changed.length}, added=${semanticDelta.added.length}, removed=${semanticDelta.removed.length}.`,
+    ],
+  };
+
+  const artifactDir = path.resolve(options.output, runId);
+  await persistRunArtifacts(artifactDir, run);
+  return { run, artifactDir };
+}
+
+export function summarizeRun(run: AuditRun): string {
+  const counts = new Map<string, number>();
+  for (const finding of run.findings) counts.set(finding.status, (counts.get(finding.status) ?? 0) + 1);
+  const countText = ["VERIFIED", "SUPPORTED", "SUSPECTED", "NOT_TESTED", "HARNESS_FAILED"]
+    .filter((status) => counts.has(status))
+    .map((status) => `${status}=${counts.get(status)}`)
+    .join("  ");
+  const lines = [
+    `Run ${run.runId}`,
+    `Mode: ${run.mode}  Files: ${run.files.length}  Obligations: ${run.obligations.length}`,
+    `Findings: ${countText || "none"}`,
+    `Tokens: ${run.tokenAccounting.inputTokens} in / ${run.tokenAccounting.outputTokens} out (source=${run.tokenAccounting.source})`,
+  ];
+  for (const finding of run.findings) {
+    const location = finding.locations[0];
+    const locationText = location ? `${location.file}:${location.line}` : "<unmapped>";
+    lines.push(`- [${finding.status}] ${finding.severity} ${finding.title} (${locationText})`);
+  }
+  return lines.join("\n");
+}
+
+export function resolveInput(root: string, input: string | undefined): string {
+  return path.resolve(root, input ?? ".");
+}
+
+export async function persistRunArtifacts(artifactDir: string, run: AuditRun): Promise<void> {
+  await writeJson(path.join(artifactDir, "run.json"), run);
+  await writeJson(path.join(artifactDir, "findings.json"), run.findings);
+  await writeJson(path.join(artifactDir, "obligations.json"), run.obligations);
+  await writeJson(path.join(artifactDir, "manifest.json"), {
+    schemaVersion: 1,
+    runId: run.runId,
+    files: run.files,
+    semanticDelta: run.semanticDelta,
+    playbook: run.playbook,
+    tokenAccounting: run.tokenAccounting,
+  });
+}
