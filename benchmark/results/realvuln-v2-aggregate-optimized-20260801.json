@@ -6,7 +6,7 @@
   "groundTruthVersion": "2.0.0",
   "benchmarkRepositoryRevision": "98872da5caa25eb4d4bc7d5b93e10e08148a2049",
   "scanner": "evo-audit",
-  "scannerCommit": "73bb42f029b3f9985111ad67cf2496280200a44b",
+  "scannerCommit": "298a812de7aa2bbecba944e4e2ddb440ad9d5e40",
   "execution": {
     "manifestRepositories": 66,
     "completedRepositories": 62,
@@ -21,20 +21,20 @@
     "labels": 2018,
     "vulnerableLabels": 1762,
     "safeLabels": 256,
-    "findings": 806,
+    "findings": 699,
     "unsupportedClaimCount": 0,
     "unsupportedClaimRate": 0,
     "candidate": {
-      "truePositive": 560,
-      "falsePositive": 246,
-      "falseNegative": 1202,
-      "trueNegative": 245,
-      "candidateCount": 806,
+      "truePositive": 555,
+      "falsePositive": 144,
+      "falseNegative": 1207,
+      "trueNegative": 248,
+      "candidateCount": 699,
       "validatedCount": 0,
-      "precision": 0.6947890818858561,
-      "recall": 0.3178206583427923,
-      "falsePositiveRate": 0.5010183299389002,
-      "f3": 0.3360537686029765,
+      "precision": 0.7939914163090128,
+      "recall": 0.31498297389330304,
+      "falsePositiveRate": 0.3673469387755102,
+      "f3": 0.335205653198043,
       "tokensPerValidatedFinding": null
     },
     "reportable": {
@@ -52,19 +52,19 @@
     }
   },
   "frameworkSummary": {
-    "flask": { "repositories": 12, "labels": 341, "findings": 216, "precision": 0.5185185185185185, "recall": 0.3835616438356164, "falsePositiveRate": 0.7027027027027027, "f3": 0.3938115330520394 },
-    "django": { "repositories": 22, "labels": 761, "findings": 343, "precision": 0.8046647230320699, "recall": 0.4113263785394933, "falsePositiveRate": 0.43506493506493504, "f3": 0.4324663115010969 },
-    "python": { "repositories": 3, "labels": 165, "findings": 26, "precision": 0.5769230769230769, "recall": 0.1079136690647482, "falsePositiveRate": 0.2972972972972973, "f3": 0.11746280344557555 },
-    "aiohttp": { "repositories": 1, "labels": 27, "findings": 5, "precision": 0.8, "recall": 0.17391304347826086, "falsePositiveRate": 0.2, "f3": 0.18867924528301885 },
-    "fastapi": { "repositories": 23, "labels": 707, "findings": 206, "precision": 0.6941747572815534, "recall": 0.22953451043338685, "falsePositiveRate": 0.4375, "f3": 0.24600034405642526 },
+    "flask": { "repositories": 12, "labels": 341, "findings": 147, "precision": 0.7278911564625851, "recall": 0.3664383561643836, "falsePositiveRate": 0.45977011494252873, "f3": 0.38558558558558564 },
+    "django": { "repositories": 22, "labels": 761, "findings": 342, "precision": 0.8070175438596491, "recall": 0.4113263785394933, "falsePositiveRate": 0.43137254901960786, "f3": 0.4325340855665257 },
+    "python": { "repositories": 3, "labels": 165, "findings": 19, "precision": 0.7894736842105263, "recall": 0.1079136690647482, "falsePositiveRate": 0.13333333333333333, "f3": 0.11811023622047244 },
+    "aiohttp": { "repositories": 1, "labels": 27, "findings": 4, "precision": 1, "recall": 0.17391304347826086, "falsePositiveRate": 0, "f3": 0.1895734597156398 },
+    "fastapi": { "repositories": 23, "labels": 707, "findings": 177, "precision": 0.807909604519774, "recall": 0.22953451043338685, "falsePositiveRate": 0.2956521739130435, "f3": 0.24723374827109268 },
     "tornado": { "repositories": 1, "labels": 17, "findings": 10, "precision": 1, "recall": 0.7142857142857143, "falsePositiveRate": 0, "f3": 0.7352941176470589 }
   },
   "comparisonToCheckedInBaseline": {
     "baseline": "benchmark/results/realvuln-v2-aggregate-20260801.json",
-    "candidatePrecision": { "baseline": 0.4637462235649547, "optimized": 0.6947890818858561, "delta": 0.2310428583209014 },
-    "candidateRecall": { "baseline": 0.17423382519863792, "optimized": 0.3178206583427923, "delta": 0.1435868331441544 },
-    "falsePositiveRate": { "baseline": 0.5916666666666667, "optimized": 0.5010183299389002, "delta": -0.0906483367277665 },
-    "f3": { "baseline": 0.1858353510895884, "optimized": 0.3360537686029765, "delta": 0.1502184175133881 }
+    "candidatePrecision": { "baseline": 0.4637462235649547, "optimized": 0.7939914163090128, "delta": 0.3302451927440581 },
+    "candidateRecall": { "baseline": 0.17423382519863792, "optimized": 0.31498297389330304, "delta": 0.14074914869466512 },
+    "falsePositiveRate": { "baseline": 0.5916666666666667, "optimized": 0.3673469387755102, "delta": -0.22431972789115645 },
+    "f3": { "baseline": 0.1858353510895884, "optimized": 0.335205653198043, "delta": 0.14937030210845462 }
   },
   "blockedRepositories": [
     { "id": "realvuln-owasp-web-playground", "url": "https://github.com/yourrepo/OWASP-Web-Playground", "commit": "5e682aca1b58e03362a5fbd9fc88c37626e429ce", "reason": "PUBLISHED_URL_UNAVAILABLE" },
@@ -77,6 +77,6 @@
     "Blocked entries are excluded from score denominators and are not treated as safe.",
     "The deterministic audit produced zero model tokens; model-backed investigation was not run in this aggregate.",
     "Reportable findings require independent validation, so reportable recall is zero in this run by policy.",
-    "The optimized commit adds Python property/taint semantics, framework-aware policy evidence, template unsafe-output evidence, session-integrity separation, and deterministic gap analysis."
+    "The optimized commit adds Python property/taint semantics, framework-aware policy evidence, template unsafe-output evidence, session-integrity separation, generated-asset filtering, parameterized-query recognition, and deterministic gap analysis."
   ]
 }

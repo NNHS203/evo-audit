@@ -111,24 +111,28 @@ independent runtime validator was supplied.
 
 The reproducible optimized run is [RealVuln v2 optimized aggregate](../benchmark/results/realvuln-v2-aggregate-optimized-20260801.json).
 It uses the same 62 completed repositories, four explicit blocked entries, and
-the same one-to-one scorer, but the `73bb42f` scanner revision adds Python
+the same one-to-one scorer, but the `298a812` scanner revision adds Python
 property/taint semantics, framework-aware policy evidence, template unsafe
-output checks, session-integrity separation, and gap analysis. It produced
-806 candidates: precision `0.695`, recall `0.318`, FPR `0.501`, and F3 `0.336`.
+output checks, session-integrity separation, generated-asset filtering,
+parameterized-query recognition, and gap analysis. It produced 699 candidates:
+precision `0.794`, recall `0.315`, FPR `0.367`, and F3 `0.335`.
 The run used no model or runtime validator, so reportable recall remains `0` by
-policy. These are observed improvements over the checked-in baseline, not a
-claim of superiority over OpenAI, Cloudflare, or research baselines.
+policy. This is a precision-focused revision relative to the previous
+candidate-only run: it removes 107 candidates and 102 unmatched candidates
+while retaining nearly the same recall. These are observed improvements over
+the checked-in baseline, not a claim of superiority over OpenAI, Cloudflare,
+or research baselines.
 
 The optimized framework breakdown is retained so aggregate wins cannot hide a
 language-specific weakness:
 
 | Framework | Repositories | Labels | Precision | Recall | FPR | F3 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Flask | 12 | 341 | 0.519 | 0.384 | 0.703 | 0.394 |
-| Django | 22 | 761 | 0.805 | 0.411 | 0.435 | 0.432 |
-| FastAPI | 23 | 707 | 0.694 | 0.230 | 0.438 | 0.246 |
+| Flask | 12 | 341 | 0.728 | 0.366 | 0.460 | 0.386 |
+| Django | 22 | 761 | 0.807 | 0.411 | 0.431 | 0.433 |
+| FastAPI | 23 | 707 | 0.808 | 0.230 | 0.296 | 0.247 |
 | Tornado | 1 | 17 | 1.000 | 0.714 | 0.000 | 0.735 |
-| Other Python / aiohttp | 4 | 192 | 0.613 | 0.117 | 0.286 | 0.128 |
+| Other Python / aiohttp | 4 | 192 | 0.826 | 0.117 | 0.118 | 0.128 |
 
 Use `scripts/realvuln-gaps.mjs` to reproduce the top false-negative classes or
 inspect a specific rule without importing temporary checkout paths into a
