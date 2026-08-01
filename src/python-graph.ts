@@ -280,6 +280,34 @@ function callArgumentText(line: string, index: number): string {
   return line.slice(open + 1);
 }
 
+function firstCallArgumentText(argumentsText: string): string {
+  let quote: string | null = null;
+  let escaped = false;
+  let depth = 0;
+  for (let index = 0; index < argumentsText.length; index += 1) {
+    const current = argumentsText[index];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (current === "\\") escaped = true;
+      else if (current === quote) quote = null;
+      continue;
+    }
+    if (current === "'" || current === '"' || current === "`") {
+      quote = current;
+      continue;
+    }
+    if (current === "(" || current === "[" || current === "{") depth += 1;
+    else if (current === ")" || current === "]" || current === "}") depth = Math.max(0, depth - 1);
+    else if (current === "," && depth === 0) return argumentsText.slice(0, index);
+  }
+  return argumentsText;
+}
+
+function redirectTargetVariable(name: string): boolean {
+  return /^(?:url|uri|next|continue|return|return_to|return_url|redirect|redirect_to|target|destination|dest|location|path|link|lane)$/i.test(name)
+    || /(?:_url|_uri|_path|_location|_destination|_target)$/i.test(name);
+}
+
 function boundedCallText(lines: string[], lineIndex: number, sinkIndex: number): string {
   let output = lines[lineIndex] ?? "";
   let depth = 0;
@@ -493,14 +521,19 @@ function buildPythonFile(state: FragmentState, file: FileFingerprint, content: s
           ? boundedCallText(rawLines, lineIndex, sink.index)
           : raw;
         const argumentText = sink.kind === "HTML_OUTPUT" || sink.kind === "PASSWORD_STORAGE" ? masked : callArgumentText(multilineCall, sink.index);
+        const taintArgumentText = sink.kind === "QUERY_EXECUTION" ? firstCallArgumentText(argumentText) : argumentText;
+        const safeRedirectWrapper = sink.kind === "REDIRECT" && /\b(?:url_for|reverse|redirect_to|build_absolute_uri)\s*\(/i.test(taintArgumentText);
         if (sink.kind === "PATH_FILE" && /\b(?:wb|ab|w|a)\b/i.test(rawMultilineCall) && /(?:\/tmp\/|\\\\tmp\\\\|final_filename|output_file)/i.test(rawMultilineCall)) continue;
         const origins = new Set<string>();
-        const matchedSources = sourceMatches(argumentText).filter((source) => sink.kind !== "PASSWORD_STORAGE" || source.index >= sink.index);
+        const matchedSources = sourceMatches(taintArgumentText).filter((source) => !safeRedirectWrapper && (sink.kind !== "PASSWORD_STORAGE" || source.index >= sink.index));
         for (const source of matchedSources) {
           const sourceId = addSourceNode(state, normalizedFile, lineIndex + 1, sink.index + Math.max(1, argumentText.indexOf(source.text)) + 2, source.text.trim(), "Attacker-controlled or environment-derived Python input.", raw, sourceKind(source.text));
           origins.add(sourceId);
         }
-        for (const variable of namesIn(argumentText, stateByName.origins.keys())) for (const origin of stateByName.origins.get(variable) ?? []) origins.add(origin);
+        for (const variable of namesIn(taintArgumentText, stateByName.origins.keys())) {
+          if (sink.kind === "REDIRECT" && !redirectTargetVariable(variable)) continue;
+          for (const origin of stateByName.origins.get(variable) ?? []) origins.add(origin);
+        }
         const parameterNames = new Set<string>();
         for (const variable of namesIn(argumentText, stateByName.parameters.keys())) for (const parameter of stateByName.parameters.get(variable) ?? []) parameterNames.add(parameter);
         for (const origin of flowOriginsForSink(state, sink.kind, origins)) addFlow(state, origin, sinkNodeId, controls, `A Python boundary value reaches a ${sink.kind} sink.`, [origin, callNodeId, sinkNodeId]);
@@ -566,6 +599,7 @@ function buildPythonFile(state: FragmentState, file: FileFingerprint, content: s
             if (parameterIndex < 0) continue;
             const argument = args[parameterIndex] ?? "";
             const origins = [...new Set(namesIn(argument, stateByName.origins.keys()).flatMap((name) => [...(stateByName.origins.get(name) ?? [])]))];
+            if (summary.kind === "REDIRECT" && !redirectTargetVariable(parameter)) continue;
             for (const origin of flowOriginsForSink(state, summary.kind, origins)) {
               const callNodeId = addNode(state, normalizedFile, lineIndex + 1, (call.index ?? 0) + 1, "CALL", helperName, "Python helper call used for interprocedural flow resolution.", raw);
               addEdge(state, { from: currentFunction?.nodeId ?? fileNodeId(normalizedFile), to: callNodeId, kind: "CALLS", confidence: "MEDIUM", label: helperName });

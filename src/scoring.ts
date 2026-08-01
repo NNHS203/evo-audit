@@ -301,21 +301,25 @@ function ruleAliases(ruleId: string): string[] {
   if (ruleId.includes("XXE")) return ["CWE-611"];
   if (ruleId.includes("UNSAFE-DESERIALIZATION")) return ["CWE-502"];
   if (ruleId.includes("REFLECTED-XSS")) return ["CWE-79", "CWE-80"];
+  if (ruleId.includes("TEMPLATE-UNSAFE-OUTPUT")) return ["CWE-79", "CWE-80"];
   if (ruleId.includes("CLEARTEXT-PASSWORD")) return ["CWE-256", "CWE-257", "CWE-522", "CWE-312"];
   if (ruleId.includes("MISSING-AUTH")) return ["CWE-306", "CWE-862", "CWE-287", "CWE-284"];
-  if (ruleId.includes("SENSITIVE-DATA-EXPOSURE")) return ["CWE-200"];
+  if (ruleId.includes("SENSITIVE-DATA-EXPOSURE")) return ["CWE-200", "CWE-209", "CWE-312", "CWE-532"];
   if (ruleId.includes("ERROR-DISCLOSURE")) return ["CWE-209"];
   if (ruleId.includes("MASS-ASSIGNMENT")) return ["CWE-915"];
   if (ruleId.includes("IDOR")) return ["CWE-639", "CWE-284", "CWE-285", "CWE-862", "CWE-200", "CWE-312", "CWE-359"];
   if (ruleId.includes("USER-ENUMERATION")) return ["CWE-204"];
-  if (ruleId.includes("RATE-LIMIT")) return ["CWE-770"];
+  if (ruleId.includes("RATE-LIMIT")) return ["CWE-770", "CWE-307", "CWE-400"];
+  if (ruleId.includes("UNRESTRICTED-FILE-UPLOAD")) return ["CWE-434"];
+  if (ruleId.includes("WEAK-RANDOMNESS")) return ["CWE-330", "CWE-338", "CWE-340", "CWE-327", "CWE-328"];
   if (ruleId.includes("REGEX-DOS")) return ["CWE-1333"];
   if (ruleId.includes("PATH-TRAVERSAL")) return ["CWE-22"];
   if (ruleId.includes("HARDCODED-CREDENTIAL")) return ["CWE-798", "CWE-259", "CWE-321"];
   if (ruleId.includes("WEAK-PASSWORD-HASH")) return ["CWE-916", "CWE-327", "CWE-328", "CWE-312"];
   if (ruleId.includes("DEBUG-MODE")) return ["CWE-215", "CWE-489", "CWE-16", "CWE-200", "CWE-209"];
-  if (ruleId.includes("INSECURE-COOKIE")) return ["CWE-614", "CWE-1004"];
-  if (ruleId.includes("SECURITY-MISCONFIGURATION")) return ["CWE-16"];
+  if (ruleId.includes("INSECURE-COOKIE")) return ["CWE-614", "CWE-1004", "CWE-16"];
+  if (ruleId.includes("SESSION-INTEGRITY")) return ["CWE-565", "CWE-807", "CWE-345"];
+  if (ruleId.includes("SECURITY-MISCONFIGURATION")) return ["CWE-16", "CWE-215", "CWE-295", "CWE-319", "CWE-326", "CWE-352", "CWE-525", "CWE-614", "CWE-693", "CWE-942", "CWE-1004", "CWE-1021", "CWE-1275"];
   return [];
 }
 

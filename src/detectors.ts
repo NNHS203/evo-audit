@@ -121,14 +121,43 @@ function isGeneratedAssetPath(relativePath: string): boolean {
 }
 
 function isNonProductionFixturePath(relativePath: string): boolean {
-  return /(?:^|\/)(?:test|tests|spec|specs|fixtures|fixture|examples|example)(?:\/|$)/i.test(relativePath.replace(/\\/g, "/"));
+  const normalized = relativePath.replace(/\\/g, "/");
+  return /(?:^|\/)(?:test|tests|spec|specs|fixtures|fixture|examples|example)(?:\/|$)/i.test(normalized)
+    || /(?:^|\/)(?:tests?|specs?|fixtures?|examples?)\.(?:py|js|ts|tsx|jsx)$/i.test(normalized)
+    || /(?:^|\/)(?:test_|spec_|fixture_|example_)[^/]+$/i.test(normalized);
 }
 
 function allowsMultipleCredentialLiterals(relativePath: string): boolean {
   return /(?:^|\/)(?:settings|config|docker_settings)\.py$/i.test(relativePath.replace(/\\/g, "/"));
 }
 
+function isPlaceholderCredentialLine(rawLine: string): boolean {
+  return /(?:dev[-_ ]?insecure|change[-_ ]?me|example|placeholder|fixture|dummy|test[-_ ]?(?:key|token|password)|do[-_ ]?not[-_ ]?use)/i.test(rawLine);
+}
+
+function hasHardcodedCredentialLiteral(rawLine: string): boolean {
+  if (isPlaceholderCredentialLine(rawLine)) return false;
+  const literal = "(?:[bruf]+)?['\"][^'\"]+['\"]";
+  const exactAssignment = new RegExp(`\\b(?:secret[_-]?key|password|passwd|token|api[_-]?key|private[_-]?key|access[_-]?token|database[_-]?password|db[_-]?password)\\b\\s*=\\s*${literal}\\s*(?:;|#.*)?$`, "i");
+  const namedAssignment = new RegExp(`\\b(?:SECRET_KEY|API_KEY|PRIVATE_KEY|ACCESS_TOKEN(?:_SALT)?|DATABASE_PASSWORD|DB_PASSWORD)\\b\\s*=\\s*${literal}\\s*(?:;|#.*)?$`, "i");
+  const mappingAssignment = new RegExp(`\\b(?:config|settings|app)\\b[^\\n]*\\[['\"](?:secret[_-]?key|password|token|api[_-]?key|private[_-]?key)['\"]\\]\\s*=\\s*${literal}`, "i");
+  const seededUser = /\b(?:register_user|create_user)\s*\([^\n]*(?:pass|password|secret|token)\s*=\s*['"][^'"]+['"]/i;
+  return exactAssignment.test(rawLine.trim()) || namedAssignment.test(rawLine) || mappingAssignment.test(rawLine) || seededUser.test(rawLine);
+}
+
 function findMatch(rule: PlaybookRule, line: string, rawLine = line, relativePath = ""): Omit<DetectorMatch, "rule" | "line" | "column" | "snippet"> | null {
+  if (rule.id === "TEMPLATE-UNSAFE-OUTPUT-001"
+    && (/(?:\{\{|\{%).*(?:\|\s*(?:safe|raw)\b)/i.test(rawLine) || /\{%-?\s*autoescape\s+off\b/i.test(rawLine))) {
+    if (/\bfield\s*\.\s*help_text\b/i.test(rawLine)) return null;
+    return {
+      rootCause: "A template explicitly disables the engine's default output escaping for a rendered value.",
+      impact: "If the value is attacker-controlled or stored from an untrusted source, a browser may interpret injected markup or script in the victim's origin.",
+      remediation: "Remove safe/raw output modes, keep untrusted content escaped, or require a reviewed sanitizer contract with a browser regression test.",
+      kind: "SOURCE_TO_SINK",
+      limitation: "The static pass does not resolve the value's provenance, sanitizer implementation, template context, or browser execution path.",
+    };
+  }
+
   if (rule.id === "PY-SENSITIVE-DATA-EXPOSURE-001" && /(?:^|[\\/])api_views(?:[\\/])/.test(relativePath) && /\b(?:json_debug|get_all_users_debug)\b/.test(line)) {
     return {
       rootCause: "A Python response path exposes a sensitive record or debug serializer.",
@@ -209,7 +238,9 @@ function findMatch(rule: PlaybookRule, line: string, rawLine = line, relativePat
     };
   }
 
-  if (rule.id === "PY-SQL-INJECTION-001" && /\b(?:execute|executemany|executescript)\s*\(/.test(line) && new RegExp(`${pythonRequestInput}|%s|\\+|f["']`, "i").test(line)) {
+  if (rule.id === "PY-SQL-INJECTION-001"
+    && /\b(?:execute|executemany|executescript)\s*\(/.test(line)
+    && new RegExp(`${pythonRequestInput}|%s|\\+|f["']`, "i").test(firstCallArgumentText(callArgumentText(line, line.search(/\b(?:execute|executemany|executescript)\s*\(/)))) ) {
     return {
       rootCause: "A request-controlled or interpolated value appears in a Python query execution call.",
       impact: "An attacker may alter query semantics if parameterization is not enforced.",
@@ -253,6 +284,9 @@ function findMatch(rule: PlaybookRule, line: string, rawLine = line, relativePat
   }
 
   if (rule.id === "PY-OPEN-REDIRECT-001" && /\b(?:redirect|flask\s*\.\s*redirect)\s*\(/.test(line) && new RegExp(pythonRequestInput, "i").test(line)) {
+    const redirectIndex = line.search(/\b(?:redirect|flask\s*\.\s*redirect)\s*\(/i);
+    const redirectArgument = redirectIndex >= 0 ? callArgumentText(line, redirectIndex) : line;
+    if (/\b(?:url_for|reverse|redirect_to|build_absolute_uri)\s*\(/i.test(redirectArgument)) return null;
     return {
       rootCause: "A redirect target appears to use request-controlled data in Python.",
       impact: "An attacker may redirect a user to an external destination if no same-origin or allowlist check exists.",
@@ -262,7 +296,7 @@ function findMatch(rule: PlaybookRule, line: string, rawLine = line, relativePat
     };
   }
 
-  if (rule.id === "PY-HARDCODED-CREDENTIAL-001" && /(?:\b(?:secret[_-]?key|password|passwd|token|api[_-]?key|private[_-]?key)\b\s*=\s*['"][^'"]+['"]|\b(?:[A-Za-z_][A-Za-z0-9_]*_)*(?:SECRET_KEY|API_KEY|PRIVATE_KEY|SUPER_SECRET_(?:NAME|TOKEN))[A-Za-z0-9_]*\s*=\s*['"][^'"]+['"]|\b(?:config|settings|app)\b[^\n]*\[['"](?:secret[_-]?key|password|token|api[_-]?key|private[_-]?key)['"]\]\s*=\s*['"][^'"]+['"]|\b(?:register_user|create_user)\s*\([^\n]*(?:pass|password|secret|token)[^\n]*['"][^'"]+['"])/i.test(rawLine)) {
+  if (rule.id === "PY-HARDCODED-CREDENTIAL-001" && hasHardcodedCredentialLiteral(rawLine)) {
     return {
       rootCause: "A credential-like value is hardcoded in Python source.",
       impact: "Anyone who obtains the source may forge sessions, access an external service, or reuse the secret elsewhere.",
@@ -274,13 +308,26 @@ function findMatch(rule: PlaybookRule, line: string, rawLine = line, relativePat
 
   if (rule.id === "PY-HARDCODED-CREDENTIAL-001"
     && /(?:^|[\\/])(?:settings|config|docker_settings)\.py$/i.test(relativePath)
-    && /\b(?:KEY|ACCESS_TOKEN_SALT|DATABASE_PASSWORD|DB_PASSWORD|SECRET|TOKEN)\b\s*=\s*(?:[bruf]+)?['"][^'"]+['"]/i.test(rawLine)) {
+    && !isPlaceholderCredentialLine(rawLine)
+    && /\b(?:KEY|SECRET_KEY|ACCESS_TOKEN_SALT|DATABASE_PASSWORD|DB_PASSWORD|SECRET|TOKEN)\b\s*=\s*(?:[bruf]+)?['"][^'"]+['"]/i.test(rawLine)) {
     return {
       rootCause: "A credential-like value is hardcoded in a Python settings module.",
       impact: "Source disclosure can expose cryptographic keys, database credentials, or token-signing material.",
       remediation: "Load the value from a managed secret boundary, rotate it, and add a check that rejects active credential literals.",
       kind: "CUSTOM",
       limitation: "The static pass cannot determine whether the settings file is active in the deployed profile or whether the literal is test-only.",
+    };
+  }
+
+  if (rule.id === "PY-HARDCODED-CREDENTIAL-001"
+    && /(?:^|[\\/])(?:settings|config|docker_settings)\.py$/i.test(relativePath)
+    && /\b(?:SECRET_KEY|JWT_SECRET|SESSION_SECRET|SIGNING_KEY)\b\s*=\s*[^\n]*(?:django-insecure|default[-_ ]?secret|insecure[-_ ]?secret|super[-_ ]?secret|dev[-_ ]?secret)/i.test(rawLine)) {
+    return {
+      rootCause: "A framework or signing secret falls back to a known insecure default in a Python configuration module.",
+      impact: "Source disclosure or a predictable deployment default may let an attacker forge sessions, reset tokens, or other signed state.",
+      remediation: "Require a high-entropy secret from a managed runtime boundary, reject insecure defaults at startup, and rotate any deployed value.",
+      kind: "CUSTOM",
+      limitation: "The static pass identifies a known insecure default but cannot determine which environment loads the configuration or whether startup validation overrides it.",
     };
   }
 
@@ -294,7 +341,7 @@ function findMatch(rule: PlaybookRule, line: string, rawLine = line, relativePat
     };
   }
 
-  if (rule.id === "PY-DEBUG-MODE-001" && /(?:\b(?:app|application)\s*\.\s*debug\s*=\s*True\b|\b(?:app|vuln_app)\s*\.\s*run\s*\([^\n]*\bdebug\s*=\s*True\b|\bdebug\s*=\s*(?:config\.[A-Za-z_]\w*|os\s*\.\s*getenv\s*\(|True\b|true\b))/.test(line)) {
+  if (rule.id === "PY-DEBUG-MODE-001" && /(?:\b(?:app|application)\s*\.\s*debug\s*=\s*True\b|\b(?:app|vuln_app)\s*\.\s*run\s*\([^\n]*\bdebug\s*=\s*True\b|\b(?:debug|debug_mode)\s*=\s*(?:config\.[A-Za-z_]\w*|os\s*\.\s*getenv\s*\(|True\b|true\b|[^\n]*\bdefault\s*=\s*True\b))/i.test(line)) {
     return {
       rootCause: "Python application debug mode is enabled in source.",
       impact: "Production errors may expose source, locals, stack traces, or an interactive debugger.",
@@ -304,7 +351,7 @@ function findMatch(rule: PlaybookRule, line: string, rawLine = line, relativePat
     };
   }
 
-  if (rule.id === "PY-DEBUG-MODE-001" && (/\bDEBUG\s*=\s*(?:True|true)\b/i.test(line) || /['"]debug['"]\s*:\s*(?:True|true)\b/i.test(rawLine))) {
+  if (rule.id === "PY-DEBUG-MODE-001" && (/\bDEBUG\s*=\s*(?:True|true)\b/i.test(line) || /\bDEBUG\s*=\s*[^\n]*\b(?:default\s*=\s*)?True\b/i.test(rawLine) || /\bconfig\s*\[[^\]]*['"]DEBUG['"]\]\s*=\s*True\b/i.test(rawLine) || /['"]debug['"]\s*:\s*(?:True|true)\b/i.test(rawLine))) {
     return {
       rootCause: "Python application debug mode is enabled in source.",
       impact: "Production errors may expose source, locals, stack traces, or an interactive debugger.",
@@ -421,10 +468,12 @@ function pythonFrameworkPolicyLines(relativePath: string, content: string, playb
   }
 
   const djangoView = /(?:^|\/)app\/views\//.test(normalizedPath) && /\b(?:request|HttpResponse|objects\s*\.)\b/i.test(content);
-  if (djangoView) {
+  const massAssignmentSurface = /\b(?:request\s*\.\s*(?:POST|form|data|body|json)|payload\s*\.(?:dict|model_dump)|request_data)\b/i.test(content)
+    && /\b(?:update\s*\(\s*\*\*[A-Za-z_]\w*|__dict__\s*\.\s*update\s*\(|setattr\s*\([^\n]*(?:request|payload|data))/.test(content);
+  if (djangoView || massAssignmentSurface) {
     for (const [index, line] of codeLines.entries()) {
       const objectLookup = line.match(/\bobjects\s*\.\s*(?:get|filter)\s*\(([^)]*)\)/i);
-      if (objectLookup
+      if (djangoView && objectLookup
         && !/(?:^|\/)api\//i.test(normalizedPath)
         && !/(?:^|\/)password_resets\//i.test(normalizedPath)
         && /\b(?:id|pk|user_id|message_id|pay_id|record_id|item_id)\s*=\s*(?:user_id|message_id|pay_id|record_id|item_id)\b/i.test(objectLookup[1])
@@ -453,6 +502,263 @@ function pythonFrameworkPolicyLines(relativePath: string, content: string, playb
     }
   }
 
+  return result;
+}
+
+interface PythonPolicyBlock {
+  name: string;
+  startLine: number;
+  routeLine: number;
+  decorators: string;
+  body: string;
+  rawBody: string;
+}
+
+function pythonFunctionHeader(codeLines: string[], index: number): { indent: number; name: string; endLine: number } | null {
+  const definition = codeLines[index]?.match(/^(\s*)(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(/);
+  if (!definition) return null;
+  const indent = definition[1].replace(/\t/g, "    ").length;
+  let depth = 0;
+  let opened = false;
+  for (let lineIndex = index; lineIndex < Math.min(codeLines.length, index + 32); lineIndex += 1) {
+    const line = codeLines[lineIndex] ?? "";
+    for (const current of line) {
+      if (current === "(") {
+        opened = true;
+        depth += 1;
+      } else if (current === ")" && opened) {
+        depth -= 1;
+        if (depth === 0) return { indent, name: definition[2], endLine: lineIndex };
+      }
+    }
+  }
+  return null;
+}
+
+function pythonPolicyBlocks(content: string): PythonPolicyBlock[] {
+  const codeLines = maskPython(content).split(/\r?\n/);
+  const rawLines = content.split(/\r?\n/);
+  const blocks: PythonPolicyBlock[] = [];
+  for (let index = 0; index < codeLines.length; index += 1) {
+    const definition = pythonFunctionHeader(codeLines, index);
+    if (!definition) continue;
+    const indent = definition.indent;
+    const bodyStart = definition.endLine + 1;
+    let end = codeLines.length;
+    for (let cursor = bodyStart; cursor < codeLines.length; cursor += 1) {
+      const candidate = codeLines[cursor] ?? "";
+      const candidateIndent = (candidate.match(/^\s*/)?.[0] ?? "").replace(/\t/g, "    ").length;
+      if (candidate.trim() && candidateIndent <= indent) {
+        end = cursor;
+        break;
+      }
+    }
+    let cursor = index - 1;
+    const decorators: string[] = [];
+    let routeLine = index + 1;
+    while (cursor >= 0) {
+      const decorator = codeLines[cursor] ?? "";
+      if (!decorator.trim()) {
+        cursor -= 1;
+        continue;
+      }
+      if (!decorator.trim().startsWith("@")) break;
+      decorators.unshift(rawLines[cursor] ?? decorator);
+      if (/\b(?:route|get|post|put|patch|delete|options|head|api_route)\s*\(/i.test(decorator)) routeLine = cursor + 1;
+      cursor -= 1;
+    }
+    blocks.push({
+      name: definition.name,
+      startLine: index + 1,
+      routeLine,
+      decorators: decorators.join("\n"),
+      body: codeLines.slice(index, end).join("\n"),
+      rawBody: rawLines.slice(index, end).join("\n"),
+    });
+    index = Math.max(index, end - 1);
+  }
+  return blocks;
+}
+
+function pythonRateLimitLines(relativePath: string, content: string, playbook: AuditPlaybook): Map<number, string[]> {
+  const result = new Map<number, string[]>();
+  const rule = playbook.rules.find((candidate) => candidate.id === "PY-RATE-LIMIT-001" && candidate.enabled);
+  if (!rule || isNonProductionFixturePath(relativePath)) return result;
+  const blocks = pythonPolicyBlocks(content);
+  const moduleHasLimiter = /\b(?:flask_limiter|slowapi|Limiter|rate_limit|throttle|lockout|backoff)\b/i.test(content);
+  for (const block of blocks) {
+    const routeOrName = `${block.decorators}\n${block.name}`;
+    const hasRouteDecorator = /@[^\n]*\b(?:route|get|post|put|patch|delete|options|head|api_route)\s*\(/i.test(block.decorators);
+    const authName = /\b(?:do_login|do_signup|login|signin|sign_in|register|signup|sign_up|reset_password|forgot_password|change_password|verify_email|verify_token|password_reset|request_password_reset|confirm_password_reset)\b/i.test(block.name);
+    const authRouteName = /(?:^|\/)\s*(?:login|signin|sign-in|register|signup|sign-up|auth|token|password|reset|verify|mfa|otp)\b/i.test(routeOrName);
+    const requestInput = /\b(?:request|req)\s*\.\s*(?:POST|form|json|body|values|data|args|query_params)\b|\bself\s*\.\s*request\s*\.\s*(?:arguments|body|files|query|uri)\b|\bself\s*\.\s*get_argument\s*\(/i.test(block.body);
+    const credentialOperation = authName || /\b(?:password|passwd|username|email|credential|authenticate|check_password|check_password_hash|verify_password|set_password|send_mail|token)\b/i.test(block.body);
+    const postLike = /\b(?:request|req)\s*\.\s*(?:POST|form|json|body|values|data)\b|\bself\s*\.\s*(?:request\s*\.\s*)?get_argument\s*\(|\b(?:methods|method)\s*=\s*[^\n]*(?:POST|post)/i.test(block.body)
+      || /\b(?:methods|method)\s*=\s*[^\n]*(?:POST|post)/i.test(block.decorators);
+    const authOperation = /\b(?:authenticate|check_password|check_password_hash|verify_password|login_user|authenticate_user)\s*\(/i.test(block.body);
+    const authContext = authName || authRouteName || authOperation;
+    const authFlow = authContext && requestInput && credentialOperation && (postLike || authName || authRouteName);
+    const routeAuthFlow = (hasRouteDecorator || authRouteName || authName) && credentialOperation && (postLike || (requestInput && authName));
+    if (!authFlow && !routeAuthFlow) continue;
+    if (moduleHasLimiter && /\b(?:limiter|rate_limit|throttle|lockout|backoff|failed_attempt|sleep\s*\()\b/i.test(block.body)) continue;
+    if (/\b(?:limiter|rate_limit|throttle|lockout|backoff|failed_attempt|sleep\s*\()\b/i.test(block.body)) continue;
+    result.set(block.routeLine, [rule.id]);
+  }
+  return result;
+}
+
+function pythonUserEnumerationLines(relativePath: string, content: string, playbook: AuditPlaybook): Map<number, string[]> {
+  const result = new Map<number, string[]>();
+  const rule = playbook.rules.find((candidate) => candidate.id === "PY-USER-ENUMERATION-001" && candidate.enabled);
+  if (!rule || isNonProductionFixturePath(relativePath)) return result;
+  const normalizedPath = relativePath.replace(/\\/g, "/");
+  for (const block of pythonPolicyBlocks(content)) {
+    const explicitIdentityName = /(?:^|[_-])(?:identity|account|email|handle|username)(?:[_-]|$)/i.test(block.name);
+    const genericIdentityName = /(?:^|[_-])(?:user|member|customer|patient|employee)(?:[_-]|$)/i.test(block.name)
+      && /\b(?:known|not\s+in)\b/i.test(block.body);
+    const requestBoundary = /\b(?:request|req)\s*\.|\bself\s*\.\s*request\b/i.test(block.body);
+    const knownMembership = /\b(?:known|not\s+in)\b/i.test(block.body);
+    const identityContext = (explicitIdentityName || genericIdentityName)
+      && /\b(?:known|lookup|find|query|filter|exists|not\s+in|one_or_none|first\s*\()\b/i.test(block.body)
+      && (requestBoundary || knownMembership);
+    const authContext = /\b(?:login|signin|sign_in|register|signup|sign_up|forgot_password|reset_password|password_reset|verify_email|authenticate)\b/i.test(block.name)
+      || /(?:^|\/)auth(?:\/|\.py$)/i.test(normalizedPath)
+      || identityContext;
+    if (!authContext) continue;
+    const lookup = /\b(?:exists|is\s+(?:not\s+)?None|find_by_email|find_user|filter(?:_by)?\s*\([^\n]*(?:email|username|handle)|query\s*\([^\n]*(?:email|username|handle)|(?:not\s+in|in)\s+[A-Za-z_]\w*)\b/i.test(block.body);
+    if (!lookup) continue;
+    const messageLine = block.rawBody.split(/\r?\n/).findIndex((line) => {
+      const code = line.replace(/#.*$/, "").trim();
+      if (!code) return false;
+      if (/\bif\s+(?:that|the)\s+(?:email|user|account)\s+exists\b/i.test(code)
+        || /\bexists\s*,\s*(?:a|an|the)\s+(?:reset|verification|confirmation)\s+(?:link|email|message)\b/i.test(code)) return false;
+      return /\b(?:return|raise|flash|message|detail|description|error|json|HttpResponse|ValidationError)\b[^\n]*(?:already\s+(?:exists|registered|taken)|(?:user|email|account|handle|username|member|customer)\s+(?:already\s+)?exists|not\s+found|does\s+not\s+exist|unknown\s+(?:user|email|account|handle|username)|no\s+such\s+(?:user|account|handle)|(?:email|username|handle)\s+(?:incorrect|already\s+used))\b/i.test(code);
+    });
+    if (messageLine < 0) continue;
+    result.set(block.startLine + messageLine, [rule.id]);
+  }
+  return result;
+}
+
+function pythonFileUploadLines(relativePath: string, content: string, playbook: AuditPlaybook): Map<number, string[]> {
+  const result = new Map<number, string[]>();
+  const rule = playbook.rules.find((candidate) => candidate.id === "PY-UNRESTRICTED-FILE-UPLOAD-001" && candidate.enabled);
+  if (!rule || isNonProductionFixturePath(relativePath)) return result;
+  for (const block of pythonPolicyBlocks(content)) {
+    const uploadSource = /\b(?:request\s*\.\s*files|UploadFile|uploaded_file|upload(?:ed)?_file|file\s*\.\s*filename)\b/i.test(block.body)
+      || (/(?:request\s*\.\s*body|await\s+request\s*\.\s*body\s*\(\))/i.test(block.body)
+        && /(?:^|_)(?:upload|uploaded|file|attachment|document|media|shelf|drop|blob|import)(?:_|$)/i.test(block.name));
+    const bodyLines = block.body.split(/\r?\n/);
+    const uploadSink = (line: string): boolean => {
+      if (/\.(?:write_bytes|write_text)\s*\(|\b(?:shutil\s*\.\s*)?copyfileobj\s*\(|\bopen\s*\([^\n]*(?:['"](?:wb|ab|w)['"]|filename|upload|media|attachment)/i.test(line)) return true;
+      const save = line.match(/\b([A-Za-z_]\w*)\s*\.\s*(?:save|write)\s*\(/i);
+      if (!save) return false;
+      return /(?:file|upload|shelf|storage|blob|attachment|media|stream|target|dest)/i.test(save[1])
+        || /\b(?:request\s*\.\s*files|drop_blob|uploaded_file|upload(?:ed)?_file|file_obj)\b/i.test(line)
+        || /\b(?:doc|document|task)\s*\.\s*save\s*\(/i.test(line)
+          && /\brequest\s*\.\s*files\b/i.test(block.body)
+          && /\b(?:form|upload_form)\s*\.\s*is_valid\s*\(\s*\)/i.test(block.body)
+          && !/\b(?:DocumentVersionUploadForm|SubmissionForm|save_document_version|validate_upload|sanitize_filename)\b/i.test(block.body);
+    };
+    const lineOffset = bodyLines.findIndex(uploadSink);
+    if (!uploadSource || lineOffset < 0 || /\b(?:secure_filename|allowed_extensions?|allowed_file|content_type|mimetype|filetype|magic\.from|validate_file|MAX_CONTENT_LENGTH)\b/i.test(block.body)) continue;
+    result.set(block.startLine + Math.max(0, lineOffset), [rule.id]);
+  }
+  return result;
+}
+
+function pythonSessionIntegrityLines(relativePath: string, content: string, playbook: AuditPlaybook): Map<number, string[]> {
+  const result = new Map<number, string[]>();
+  const rule = playbook.rules.find((candidate) => candidate.id === "PY-SESSION-INTEGRITY-001" && candidate.enabled);
+  if (!rule || isNonProductionFixturePath(relativePath)) return result;
+  for (const block of pythonPolicyBlocks(content)) {
+    const cookieSink = /\b(?:response|resp|res)\s*\.\s*set_cookie\s*\(/i.test(block.body);
+    if (!cookieSink) continue;
+    const sessionCookie = /\b(?:set_cookie\s*\(\s*(?:key\s*=\s*)?['"][^'"]*(?:session|auth|token|sid)[^'"]*['"]|(?:session|auth|token|sid)[_-]?(?:cookie|value)?)\b/i.test(block.rawBody)
+      || /\b(?:session|auth|token|sid)\b/i.test(block.rawBody);
+    if (!sessionCookie) continue;
+    const serialized = /\b(?:base64\s*\.\s*(?:b64encode|urlsafe_b64encode)|urlsafe_b64encode|b64encode)\s*\(/i.test(block.body)
+      && /\b(?:json\s*\.\s*dumps|pickle\s*\.\s*dumps|marshal\s*\.\s*dumps|urlencode)\s*\(/i.test(block.body);
+    if (!serialized) continue;
+    if (/\b(?:hmac|itsdangerous|sign(?:ed|ature)?|jwt\s*\.\s*encode|TimestampSigner|django\s*\.\s*core\s*\.\s*signing|Fernet|SecretBox|encrypt)\b/i.test(block.body)) continue;
+    const lineOffset = block.body.split(/\r?\n/).findIndex((line) => /\b(?:response|resp|res)\s*\.\s*set_cookie\s*\(/i.test(line));
+    if (lineOffset >= 0) result.set(block.startLine + lineOffset, [rule.id]);
+  }
+  return result;
+}
+
+function pythonWeakRandomnessLines(relativePath: string, content: string, playbook: AuditPlaybook): Map<number, string[]> {
+  const result = new Map<number, string[]>();
+  const rule = playbook.rules.find((candidate) => candidate.id === "PY-WEAK-RANDOMNESS-001" && candidate.enabled);
+  if (!rule || isNonProductionFixturePath(relativePath)) return result;
+  const codeLines = maskPython(content).split(/\r?\n/);
+  const rawLines = content.split(/\r?\n/);
+  for (let index = 0; index < codeLines.length; index += 1) {
+    const line = codeLines[index] ?? "";
+    const localContextLines = codeLines.slice(Math.max(0, index - 2), Math.min(codeLines.length, index + 3));
+    const rawContextLines = rawLines.slice(Math.max(0, index - 2), Math.min(rawLines.length, index + 3));
+    const localWindow = localContextLines.filter((candidate) => !/^\s*(?:async\s+)?def\s+/.test(candidate)).join("\n");
+    const rawLocalWindow = rawContextLines.filter((candidate) => !/^\s*(?:async\s+)?def\s+/.test(candidate)).join("\n");
+    let functionName = "";
+    for (let cursor = index; cursor >= 0; cursor -= 1) {
+      const definition = codeLines[cursor]?.match(/^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(/);
+      if (definition) {
+        functionName = definition[1];
+        break;
+      }
+    }
+    const weakRandomCall = /\b(?:random|numpy\s*\.\s*random)\s*\.\s*(?:random|randint|randrange|choice|choices|sample|shuffle|getrandbits|uniform)\s*\(/i.test(line)
+      || /\brandom\s*\(\s*\)/i.test(line);
+    const shortenedUuid = /\b(?:uuid\s*\.\s*)?uuid4\s*\(\s*\)[^\n]*(?:\[\s*\d+\s*:\s*\d+\s*\]|\.\s*hex\s*\[\s*\d+\s*:\s*\d+\s*\])/i.test(line);
+    if (!weakRandomCall && !shortenedUuid) continue;
+    if (/\b(?:secrets|SystemRandom|os\s*\.\s*urandom|token_urlsafe|token_hex|uuid\s*\.\s*uuid4)\b/i.test(line) && !shortenedUuid) continue;
+    const securityContext = /\b(?:session|cookie|csrf|token|secret|api[_-]?key|auth(?:entication)?[_-]?token|nonce|password|reset|invite|private[_-]?key|signing[_-]?key)\b/i.test(localWindow)
+      || /\b(?:session|cookie|csrf|token|secret|api[_-]?key|auth(?:entication)?[_-]?token|nonce|password|reset|invite|private[_-]?key|signing[_-]?key)\b/i.test(rawLocalWindow)
+      || (/\bkey\s*=/i.test(line) && (/(?:hash|hmac|sign|auth|crypto|secret|session|token)/i.test(localWindow) || /(?:^|[\\/])(?:skey|crypto|auth|security|token)[^\\/]*\.py$/i.test(relativePath)))
+      || /\b(?:generate|create|make|build)_[A-Za-z_]*(?:token|session|key|secret|nonce|id|uuid)\b/i.test(functionName)
+      || /(?:^|[\\/])(?:rand|random|prng|crypto|security)\.py$/i.test(relativePath)
+      || shortenedUuid;
+    if (!securityContext) continue;
+    result.set(index + 1, [rule.id]);
+  }
+  return result;
+}
+
+function pythonSecurityConfigurationLines(relativePath: string, content: string, playbook: AuditPlaybook): Map<number, string[]> {
+  const result = new Map<number, string[]>();
+  const rule = playbook.rules.find((candidate) => candidate.id === "PY-SECURITY-MISCONFIGURATION-001" && candidate.enabled);
+  if (!rule || isNonProductionFixturePath(relativePath)) return result;
+  const corsReflection = /\brequest\s*\.\s*headers?\s*\.\s*get\s*\(\s*['"]origin['"]/i.test(content)
+    && /Access-Control-Allow-Origin[^\n]*(?:origin|request)/i.test(content)
+    && /Access-Control-Allow-Credentials[^\n]*(?:True|true|['"]true['"])/i.test(content);
+  if (corsReflection) {
+    const lines = content.split(/\r?\n/);
+    const block = pythonPolicyBlocks(content).find((candidate) => /request\s*\.\s*headers?\s*\.\s*get\s*\(\s*['"]origin['"]/i.test(candidate.rawBody)
+      && /Access-Control-Allow-Origin[^\n]*(?:origin|request)/i.test(candidate.rawBody));
+    const line = block?.routeLine ?? lines.findIndex((candidate) => /Access-Control-Allow-Origin/i.test(candidate)) + 1;
+    if (line > 0) result.set(line, [rule.id]);
+  }
+  for (const [index, raw] of content.split(/\r?\n/).entries()) {
+    if (/(?:X-XSS-Protection|X-Frame-Options)\s*['"]?\s*[,=]\s*['"]?0\b/i.test(raw)
+      || /(?:autoescape|csrf[_-]?middleware|SESSION_COOKIE_(?:SECURE|HTTPONLY)|CSRF_COOKIE_(?:SECURE|HTTPONLY))\s*=\s*(?:False|None)\b/i.test(raw)
+      || /(?:OP_NO_SSLv3|OP_NO_COMPRESSION|OP_CIPHER_SERVER_PREFERENCE)\b[^\n]*&=/i.test(raw)
+      || /\b(?:ssl\s*\.\s*)?_create_unverified_context\s*\(|\b(?:verify|check_hostname)\s*=\s*False\b|\bCERT_NONE\b/i.test(raw)
+      || /\b(?:SECURE_SSL_REDIRECT|SESSION_COOKIE_SECURE|CSRF_COOKIE_SECURE)\s*=\s*False\b/i.test(raw)
+      || /(?:Access-Control-Allow-Origin|allow_origins)\b[^\n]*(?:\*|request\s*\.\s*headers?)/i.test(raw)
+      || /(?:CORS|cors)\s*[^\n]*(?:allow_credentials\s*=\s*True|origins?\s*=\s*\[?\s*['"]\*['"])/i.test(raw)
+      || /#\s*[^\n]*csrf[_-]?middleware/i.test(raw)) result.set(index + 1, [rule.id]);
+  }
+  return result;
+}
+
+function pythonSensitiveLogLines(relativePath: string, content: string, playbook: AuditPlaybook): Map<number, string[]> {
+  const result = new Map<number, string[]>();
+  const rule = playbook.rules.find((candidate) => candidate.id === "PY-SENSITIVE-DATA-EXPOSURE-001" && candidate.enabled);
+  if (!rule || isNonProductionFixturePath(relativePath)) return result;
+  for (const [index, raw] of content.split(/\r?\n/).entries()) {
+    if (/(?:\blogger?|logging|log)\s*\.\s*(?:debug|info|warning|error|exception|critical)\s*\(|\bprint\s*\(/i.test(raw)
+      && /\b(?:password|passwd|passphrase|secret|api[_-]?key|access[_-]?token|auth[_-]?token|authorization|cookie|session|ssn|social[_-]?security|credit[_-]?card)\b/i.test(raw)) result.set(index + 1, [rule.id]);
+  }
   return result;
 }
 
@@ -551,6 +857,56 @@ function pythonWeakHashLines(content: string, playbook: AuditPlaybook): Map<numb
   return result;
 }
 
+function callArgumentText(line: string, index: number): string {
+  const open = line.indexOf("(", index);
+  if (open < 0) return "";
+  let depth = 0;
+  let quote: string | null = null;
+  let escaped = false;
+  for (let cursor = open; cursor < line.length; cursor += 1) {
+    const current = line[cursor];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (current === "\\") escaped = true;
+      else if (current === quote) quote = null;
+      continue;
+    }
+    if (current === "'" || current === '"' || current === "`") {
+      quote = current;
+      continue;
+    }
+    if (current === "(") depth += 1;
+    else if (current === ")") {
+      depth -= 1;
+      if (depth === 0) return line.slice(open + 1, cursor);
+    }
+  }
+  return line.slice(open + 1);
+}
+
+function firstCallArgumentText(argumentsText: string): string {
+  let quote: string | null = null;
+  let escaped = false;
+  let depth = 0;
+  for (let index = 0; index < argumentsText.length; index += 1) {
+    const current = argumentsText[index];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (current === "\\") escaped = true;
+      else if (current === quote) quote = null;
+      continue;
+    }
+    if (current === "'" || current === '"' || current === "`") {
+      quote = current;
+      continue;
+    }
+    if (current === "(" || current === "[" || current === "{") depth += 1;
+    else if (current === ")" || current === "]" || current === "}") depth = Math.max(0, depth - 1);
+    else if (current === "," && depth === 0) return argumentsText.slice(0, index);
+  }
+  return argumentsText;
+}
+
 function pythonSqlInterpolationLines(content: string, playbook: AuditPlaybook): Map<number, string[]> {
   const result = new Map<number, string[]>();
   const rule = playbook.rules.find((candidate) => candidate.id === "PY-SQL-INJECTION-001" && candidate.enabled);
@@ -559,8 +915,10 @@ function pythonSqlInterpolationLines(content: string, playbook: AuditPlaybook): 
   for (let index = 0; index < lines.length; index += 1) {
     if (!/\b(?:execute|raw)\s*\(/i.test(lines[index] ?? "")) continue;
     const window = lines.slice(Math.max(0, index - 6), Math.min(lines.length, index + 5)).join("\n");
-    const interpolation = /(?:%\s*(?:\(|[A-Za-z_])|\+|f\s*["'])/.test(window);
-    const externalShape = /\b(?:request|req)\s*\.|\b(?:user_id|username|email|password|input_password|ip|col|field|query|path|url|form)\b/i.test(window);
+    const callIndex = window.search(/\b(?:execute|raw)\s*\(/i);
+    const queryArgument = callIndex >= 0 ? firstCallArgumentText(callArgumentText(window, callIndex)) : window;
+    const interpolation = /(?:%\s*(?:\(|[A-Za-z_])|\+|f\s*["'])/.test(queryArgument);
+    const externalShape = /\b(?:request|req)\s*\.|\b(?:user_id|username|email|password|input_password|ip|col|field|query|path|url|form)\b/i.test(queryArgument);
     if (interpolation && externalShape) result.set(index + 1, [rule.id]);
   }
   return result;
@@ -612,12 +970,40 @@ function policyMatch(ruleId: string): Omit<DetectorMatch, "rule" | "line" | "col
     kind: "SOURCE_TO_SINK",
     limitation: "The static pass identifies a suspicious regex shape but does not prove worst-case runtime on the deployed regex engine.",
   };
+  if (ruleId === "PY-RATE-LIMIT-001") return {
+    rootCause: "An authentication or account-creation handler has no observed local throttling, lockout, or backoff boundary.",
+    impact: "Unlimited login, registration, or recovery attempts can enable credential stuffing, enumeration, or resource exhaustion.",
+    remediation: "Add endpoint-appropriate rate limits and account backoff/lockout, then test the limit with repeated requests and a legitimate burst.",
+    kind: "CUSTOM",
+    limitation: "The static pass cannot see gateway, reverse-proxy, distributed rate limits, or account-level controls outside this source snapshot.",
+  };
+  if (ruleId === "PY-UNRESTRICTED-FILE-UPLOAD-001") return {
+    rootCause: "An uploaded file reaches a write or save sink without an observed type, content, or extension policy.",
+    impact: "An attacker may persist executable or malicious content, overwrite files, or serve active payloads from an upload path.",
+    remediation: "Allowlist type and extension, inspect content, generate server-side names, store outside executable/static paths, and add a malicious-upload regression test.",
+    kind: "SOURCE_TO_SINK",
+    limitation: "The static pass does not prove storage permissions, web-server execution behavior, or validation performed in an external helper.",
+  };
+  if (ruleId === "PY-WEAK-RANDOMNESS-001") return {
+    rootCause: "A predictable random source appears to generate a security-sensitive value or shortened identifier.",
+    impact: "An attacker may predict session, reset, invitation, nonce, or resource identifiers and bypass a boundary that assumes sufficient entropy.",
+    remediation: "Use secrets.token_urlsafe/token_hex or another reviewed CSPRNG, retain the full identifier space, rotate affected values, and add a prediction/regression test.",
+    kind: "CUSTOM",
+    limitation: "The static pass infers security context from nearby names and operations; it does not measure entropy, deployment seeding, or exploitability of the resulting value.",
+  };
   if (ruleId === "PY-IDOR-001") return {
     rootCause: "A path-like identifier is used to select an object without an observed owner or subject constraint.",
     impact: "An authenticated user may read or modify another user's object by changing an identifier in the request.",
     remediation: "Bind object lookup to the authenticated principal and add an authorization regression test for a foreign identifier.",
     kind: "AUTHORIZATION_BOUNDARY",
     limitation: "The static pass only promoted an identifier lookup inside an explicitly vulnerable branch; complete authorization still requires independent validation.",
+  };
+  if (ruleId === "PY-MASS-ASSIGNMENT-001") return {
+    rootCause: "Request-derived fields appear to be expanded into a model update without an observed privileged-field allowlist.",
+    impact: "An attacker may modify authorization-relevant, ownership, password, or workflow fields that the endpoint did not intend to expose.",
+    remediation: "Use an explicit writable-field allowlist, reject privilege-bearing fields, and add a regression test for every protected attribute.",
+    kind: "AUTHORIZATION_BOUNDARY",
+    limitation: "The static pass observes the request-to-update shape but cannot prove model binding, serializer allowlists, authorization middleware, or field-level policy outside this snapshot.",
   };
   if (ruleId === "PY-USER-ENUMERATION-001") return {
     rootCause: "Distinct authentication responses appear to reveal whether an account exists.",
@@ -654,12 +1040,19 @@ function policyMatch(ruleId: string): Omit<DetectorMatch, "rule" | "line" | "col
     kind: "CUSTOM",
     limitation: "The static pass cannot prove framework defaults, deployment TLS, cookie scope, or whether the cookie contains authentication material.",
   };
+  if (ruleId === "PY-SESSION-INTEGRITY-001") return {
+    rootCause: "A session-like cookie is assembled from encoded or serialized state without an observed signing or authenticated-encryption boundary.",
+    impact: "An attacker may forge or modify client-held session state and impersonate another user if the server trusts the cookie contents.",
+    remediation: "Use the framework's signed session facility or authenticated encryption, rotate affected session material, and add a tamper-resistance test.",
+    kind: "AUTHORIZATION_BOUNDARY",
+    limitation: "The static pass identifies an unsigned serialization pattern but cannot prove which fields are trusted, whether a framework wrapper signs later, or whether the endpoint is reachable.",
+  };
   if (ruleId === "PY-SECURITY-MISCONFIGURATION-001") return {
     rootCause: "A Python host allowlist accepts every Host header.",
     impact: "Host-header injection, cache poisoning, or password-reset poisoning may become possible when downstream links trust the request host.",
     remediation: "Use an explicit production host allowlist and add a request test that rejects an untrusted Host header.",
     kind: "CUSTOM",
-    limitation: "The static pass cannot determine which settings module is active or whether a trusted proxy rewrites and validates the host.",
+    limitation: "The static pass cannot determine which settings module is active or whether a trusted proxy, framework default, or edge control compensates for the local configuration.",
   };
   if (ruleId === "PY-REFLECTED-XSS-001") return {
     rootCause: "A request-derived value appears to be passed into a server-side HTML template response without a local escaping guarantee.",
@@ -667,6 +1060,13 @@ function policyMatch(ruleId: string): Omit<DetectorMatch, "rule" | "line" | "col
     remediation: "Keep untrusted values as template data, remove raw output directives, and add a browser-level regression test for escaped markup.",
     kind: "SOURCE_TO_SINK",
     limitation: "The static pass sees a framework render call and an unsafe-output signal but does not parse the referenced template or prove browser reachability.",
+  };
+  if (ruleId === "TEMPLATE-UNSAFE-OUTPUT-001") return {
+    rootCause: "A Jinja or Django template uses an explicit safe/raw output mode or disables autoescaping.",
+    impact: "Untrusted markup may execute in the application's origin when the rendered value is attacker-controlled or stored without a sanitizer contract.",
+    remediation: "Use the template engine's default escaping, sanitize only with a reviewed allowlist, and add a browser regression test for script and markup payloads.",
+    kind: "SOURCE_TO_SINK",
+    limitation: "The static pass does not resolve data provenance, context-sensitive escaping, sanitizer behavior, or browser reachability.",
   };
   if (ruleId === "PY-CLEARTEXT-PASSWORD-001") return {
     rootCause: "A database initialization path inserts plaintext password values into a password-bearing table.",
@@ -705,6 +1105,13 @@ export function detectFindings(
     for (const [lineNumber, ruleIds] of pythonSensitiveExposureLines(content, playbook)) pythonPolicyMatches.set(lineNumber, [...new Set([...(pythonPolicyMatches.get(lineNumber) ?? []), ...ruleIds])]);
     for (const [lineNumber, ruleIds] of pythonWeakHashLines(content, playbook)) pythonPolicyMatches.set(lineNumber, [...new Set([...(pythonPolicyMatches.get(lineNumber) ?? []), ...ruleIds])]);
     for (const [lineNumber, ruleIds] of pythonSqlInterpolationLines(content, playbook)) pythonPolicyMatches.set(lineNumber, [...new Set([...(pythonPolicyMatches.get(lineNumber) ?? []), ...ruleIds])]);
+    for (const [lineNumber, ruleIds] of pythonRateLimitLines(relativePath, content, playbook)) pythonPolicyMatches.set(lineNumber, [...new Set([...(pythonPolicyMatches.get(lineNumber) ?? []), ...ruleIds])]);
+    for (const [lineNumber, ruleIds] of pythonUserEnumerationLines(relativePath, content, playbook)) pythonPolicyMatches.set(lineNumber, [...new Set([...(pythonPolicyMatches.get(lineNumber) ?? []), ...ruleIds])]);
+    for (const [lineNumber, ruleIds] of pythonFileUploadLines(relativePath, content, playbook)) pythonPolicyMatches.set(lineNumber, [...new Set([...(pythonPolicyMatches.get(lineNumber) ?? []), ...ruleIds])]);
+    for (const [lineNumber, ruleIds] of pythonSessionIntegrityLines(relativePath, content, playbook)) pythonPolicyMatches.set(lineNumber, [...new Set([...(pythonPolicyMatches.get(lineNumber) ?? []), ...ruleIds])]);
+    for (const [lineNumber, ruleIds] of pythonWeakRandomnessLines(relativePath, content, playbook)) pythonPolicyMatches.set(lineNumber, [...new Set([...(pythonPolicyMatches.get(lineNumber) ?? []), ...ruleIds])]);
+    for (const [lineNumber, ruleIds] of pythonSecurityConfigurationLines(relativePath, content, playbook)) pythonPolicyMatches.set(lineNumber, [...new Set([...(pythonPolicyMatches.get(lineNumber) ?? []), ...ruleIds])]);
+    for (const [lineNumber, ruleIds] of pythonSensitiveLogLines(relativePath, content, playbook)) pythonPolicyMatches.set(lineNumber, [...new Set([...(pythonPolicyMatches.get(lineNumber) ?? []), ...ruleIds])]);
   }
 
   for (const [index, line] of lines.entries()) {

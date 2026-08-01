@@ -3,7 +3,7 @@ import type { AuditPlaybook, AuditConfig, PlaybookRule } from "./types.js";
 export const defaultConfig: AuditConfig = {
   schemaVersion: 1,
   ignore: ["node_modules", ".git", "dist", "build", "coverage", "audit-runs"],
-  includeExtensions: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py"],
+  includeExtensions: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".html", ".htm", ".jinja", ".jinja2"],
   playbook: "audit.playbook.json",
   tokenBudget: 12000,
 };
@@ -77,6 +77,16 @@ const defaultRules: PlaybookRule[] = [
     severity: "HIGH",
     evidenceRequired: "T2_REPRODUCIBLE",
     globs: ["**/*.py"],
+    enabled: true,
+  },
+  {
+    id: "TEMPLATE-UNSAFE-OUTPUT-001",
+    title: "Template renders a value through an unsafe output mode",
+    description:
+      "A Jinja or Django template explicitly disables escaping for a value. The value's provenance and sanitizer contract must be verified before closure.",
+    severity: "HIGH",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.html", "**/*.htm", "**/*.jinja", "**/*.jinja2"],
     enabled: true,
   },
   {
@@ -270,6 +280,26 @@ const defaultRules: PlaybookRule[] = [
     enabled: true,
   },
   {
+    id: "PY-UNRESTRICTED-FILE-UPLOAD-001",
+    title: "Uploaded Python file reaches storage without a content policy",
+    description:
+      "An uploaded file reaches a save or write sink without an observed type, content, or extension allowlist.",
+    severity: "HIGH",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.py"],
+    enabled: true,
+  },
+  {
+    id: "PY-WEAK-RANDOMNESS-001",
+    title: "Non-cryptographic randomness used for a security value",
+    description:
+      "A predictable random source appears to generate a session, token, secret, nonce, or shortened identifier.",
+    severity: "HIGH",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.py"],
+    enabled: true,
+  },
+  {
     id: "PY-HARDCODED-CREDENTIAL-001",
     title: "Credential-like literal in Python source",
     description:
@@ -295,6 +325,16 @@ const defaultRules: PlaybookRule[] = [
     description:
       "A response sets a session or authentication cookie without an observed Secure or HttpOnly attribute. Deployment and framework defaults must be verified before closure.",
     severity: "MEDIUM",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.py"],
+    enabled: true,
+  },
+  {
+    id: "PY-SESSION-INTEGRITY-001",
+    title: "Python session cookie is derived without an observed integrity boundary",
+    description:
+      "A session-like cookie appears to carry merely encoded or serialized client-controlled state without a signing or authenticated-encryption boundary. Runtime exploitability and framework defaults must be verified before closure.",
+    severity: "CRITICAL",
     evidenceRequired: "T2_REPRODUCIBLE",
     globs: ["**/*.py"],
     enabled: true,

@@ -791,11 +791,21 @@ test("Python graph tracks local assignments and helper summaries without flaggin
     "    return subprocess.run(['echo', 'fixed'], check=True)",
   ].join("\n"), "utf8");
   await writeFile(path.join(root, "utility.py"), "import os\nvalue = os.environ.get('PATH')\nsite = '/tmp/' + value\n", "utf8");
+  await writeFile(path.join(root, "safe.py"), [
+    "from flask import redirect, request, url_for",
+    "import sqlite3",
+    "def safe():",
+    "    query = 'SELECT id FROM users WHERE id = ?'",
+    "    sqlite3.connect(':memory:').execute(query, (request.args.get('id'),))",
+    "    return redirect(url_for('detail', id=request.args.get('id'))) ",
+  ].join("\n"), "utf8");
   const result = await runAudit(root, { output: path.join(root, "runs") });
   assert.equal(result.run.recon?.projectKind, "PYTHON");
   assert.equal(result.run.recon?.codeGraph?.flows.some((flow) => flow.reason.includes("Python helper")), true);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-COMMAND-INJECTION-001"), true);
   assert.equal(result.run.findings.some((finding) => finding.locations.some((location) => location.line === 11)), false);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-SQL-INJECTION-001" && finding.locations.some((location) => location.file === "safe.py")), false);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-OPEN-REDIRECT-001" && finding.locations.some((location) => location.file === "safe.py")), false);
 });
 
 test("Python property graph separates HTML output, password storage, and protected routes", async () => {
@@ -882,6 +892,7 @@ test("Python framework policies distinguish deployment settings, auth cookies, a
     "DEBUG = True",
     "ALLOWED_HOSTS = ['*']",
     "KEY = b'1234567890'",
+    "SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-demo')",
   ].join("\n"), "utf8");
   await mkdir(path.join(root, "app", "views", "sessions"), { recursive: true });
   await mkdir(path.join(root, "app", "views", "work_info"), { recursive: true });
@@ -893,10 +904,130 @@ test("Python framework policies distinguish deployment settings, auth cookies, a
     "def work_info(request, user_id):",
     "    return User.objects.get(id=user_id)",
   ].join("\n"), "utf8");
+  await writeFile(path.join(root, "auth.py"), [
+    "from flask import request",
+    "@app.post('/login')",
+    "def login():",
+    "    return authenticate(request.form['username'], request.form['password'])",
+    "",
+    "@app.get('/login')",
+    "def login_page():",
+    "    return render_template('login.html')",
+    "",
+    "def authenticate_helper(input_email, input_password):",
+    "    return User.find_by_email(input_email)",
+  ].join("\n"), "utf8");
+  await writeFile(path.join(root, "uploads.py"), [
+    "from flask import request",
+    "@app.post('/upload')",
+    "def upload():",
+    "    uploaded_file = request.files['file']",
+    "    uploaded_file.save('/srv/uploads/' + uploaded_file.filename)",
+    "",
+    "async def raw_upload(",
+    "    request: Request,",
+    "    name: str = 'raw.bin',",
+    "):",
+    "    body = await request.body()",
+    "    target = Path('/srv/uploads') / name",
+    "    target.write_bytes(body)",
+  ].join("\n"), "utf8");
+  await writeFile(path.join(root, "logging.py"), "import logging\nlogging.info('password=%s token=%s', password, token)\n", "utf8");
+  await writeFile(path.join(root, "enum.py"), [
+    "from flask import request",
+    "@app.post('/register')",
+    "def register():",
+    "    email = request.form['email']",
+    "    if User.query.filter_by(email=email).first():",
+    "        return {'error': 'Email already exists'}",
+    "    return {'ok': True}",
+  ].join("\n"), "utf8");
+  await writeFile(path.join(root, "identity.py"), [
+    "def identity_hint(request):",
+    "    handle = request.GET.get('handle', '')",
+    "    known = {'north': '4812'}",
+    "    if handle not in known:",
+    "        return JsonResponse({'detail': 'unknown handle'}, status=404)",
+    "    return JsonResponse({'status': 'queued'})",
+  ].join("\n"), "utf8");
+  await mkdir(path.join(root, "app", "views"), { recursive: true });
+  await writeFile(path.join(root, "app", "views", "mass.py"), [
+    "def update_profile(request, user):",
+    "    data = request.POST.dict().copy()",
+    "    user.update(**data)",
+  ].join("\n"), "utf8");
+  await writeFile(path.join(root, "randomness.py"), [
+    "import random",
+    "import secrets",
+    "import uuid",
+    "def create_session_token():",
+    "    return ''.join(random.sample('abcdef0123456789', 12))",
+    "",
+    "def create_short_id():",
+    "    return str(uuid.uuid4())[0:6]",
+    "",
+    "def pick_benefit_index():",
+    "    return random.randint(0, 3)",
+    "",
+    "def create_secure_token():",
+    "    return secrets.token_urlsafe(24)",
+  ].join("\n"), "utf8");
+  await writeFile(path.join(root, "session_integrity.py"), [
+    "import base64",
+    "import json",
+    "def create(response, username):",
+    "    session = base64.b64encode(json.dumps({'username': username}).encode())",
+    "    response.set_cookie('vulpy_session', session)",
+    "    return response",
+    "",
+    "def create_signed(response, username, signer):",
+    "    session = base64.b64encode(json.dumps({'username': username}).encode())",
+    "    signed = signer.sign(session)",
+    "    response.set_cookie('signed_session', signed)",
+    "    return response",
+  ].join("\n"), "utf8");
+  await writeFile(path.join(root, "unsafe_config.py"), [
+    "DEBUG = _env_bool('DJANGO_DEBUG', default=True)",
+    "def after_request(response):",
+    "    origin = request.headers.get('Origin')",
+    "    response.headers['Access-Control-Allow-Origin'] = origin",
+    "    response.headers['Access-Control-Allow-Credentials'] = 'true'",
+    "    return response",
+    "",
+    "def fetch(url):",
+    "    return requests.get(url, verify=False)",
+  ].join("\n"), "utf8");
+  await writeFile(path.join(root, "rand.py"), [
+    "import random",
+    "def do_random():",
+    "    return str(random.uniform(0, 1))",
+  ].join("\n"), "utf8");
+  await mkdir(path.join(root, "templates"), { recursive: true });
+  await writeFile(path.join(root, "templates", "unsafe.html"), "<p>{{ message | safe }}</p>\n", "utf8");
+  await writeFile(path.join(root, "templates", "escaped.html"), "<p>{{ message }}</p>\n", "utf8");
   const result = await runAudit(root, { output: path.join(root, "runs") });
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-DEBUG-MODE-001"), true);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-SECURITY-MISCONFIGURATION-001"), true);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-HARDCODED-CREDENTIAL-001"), true);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-INSECURE-COOKIE-001"), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-SESSION-INTEGRITY-001" && finding.locations.some((location) => location.file === "session_integrity.py" && location.line === 5)), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-SESSION-INTEGRITY-001" && finding.locations.some((location) => location.file === "session_integrity.py" && location.line === 11)), false);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-DEBUG-MODE-001" && finding.locations.some((location) => location.file === "unsafe_config.py" && location.line === 1)), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-SECURITY-MISCONFIGURATION-001" && finding.locations.some((location) => location.file === "unsafe_config.py")), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-HARDCODED-CREDENTIAL-001" && finding.locations.some((location) => location.file === "settings.py" && location.line === 4)), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-WEAK-RANDOMNESS-001" && finding.locations.some((location) => location.file === "rand.py")), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "TEMPLATE-UNSAFE-OUTPUT-001" && finding.locations.some((location) => location.file === "templates/unsafe.html")), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "TEMPLATE-UNSAFE-OUTPUT-001" && finding.locations.some((location) => location.file === "templates/escaped.html")), false);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-IDOR-001"), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-RATE-LIMIT-001" && finding.locations.some((location) => location.file === "auth.py")), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-RATE-LIMIT-001" && finding.locations.some((location) => location.file === "auth.py" && location.line >= 7)), false);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-UNRESTRICTED-FILE-UPLOAD-001" && finding.locations.some((location) => location.file === "uploads.py")), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-SENSITIVE-DATA-EXPOSURE-001" && finding.locations.some((location) => location.file === "logging.py")), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-USER-ENUMERATION-001" && finding.locations.some((location) => location.file === "enum.py")), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-USER-ENUMERATION-001" && finding.locations.some((location) => location.file === "identity.py")), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-MASS-ASSIGNMENT-001" && finding.locations.some((location) => location.file === "app/views/mass.py" && location.line === 3)), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-WEAK-RANDOMNESS-001" && finding.locations.some((location) => location.file === "randomness.py" && location.line === 5)), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-WEAK-RANDOMNESS-001" && finding.locations.some((location) => location.file === "randomness.py" && location.line === 8)), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-WEAK-RANDOMNESS-001" && finding.locations.some((location) => location.file === "randomness.py" && location.line === 11)), false);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-WEAK-RANDOMNESS-001" && finding.locations.some((location) => location.file === "randomness.py" && location.line === 14)), false);
 });

@@ -15,7 +15,11 @@
     ".jsx",
     ".mjs",
     ".cjs",
-    ".py"
+    ".py",
+    ".html",
+    ".htm",
+    ".jinja",
+    ".jinja2"
   ],
   "playbook": "audit.playbook.json",
   "tokenBudget": 12000
