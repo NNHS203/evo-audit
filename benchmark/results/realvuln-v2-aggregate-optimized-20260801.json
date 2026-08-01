@@ -6,7 +6,7 @@
   "groundTruthVersion": "2.0.0",
   "benchmarkRepositoryRevision": "98872da5caa25eb4d4bc7d5b93e10e08148a2049",
   "scanner": "evo-audit",
-  "scannerCommit": "22d932c2fe2728d29c9912231f46e9412b860e0f",
+  "scannerCommit": "a6cf9c835ba9d06660c78f2f59e968f142106689",
   "execution": {
     "manifestRepositories": 66,
     "completedRepositories": 62,
@@ -21,20 +21,20 @@
     "labels": 2018,
     "vulnerableLabels": 1762,
     "safeLabels": 256,
-    "findings": 700,
+    "findings": 703,
     "unsupportedClaimCount": 0,
     "unsupportedClaimRate": 0,
     "candidate": {
-      "truePositive": 557,
+      "truePositive": 560,
       "falsePositive": 143,
-      "falseNegative": 1205,
+      "falseNegative": 1202,
       "trueNegative": 248,
-      "candidateCount": 700,
+      "candidateCount": 703,
       "validatedCount": 0,
-      "precision": 0.7957142857142857,
-      "recall": 0.31611804767309876,
+      "precision": 0.7965860597439545,
+      "recall": 0.3178206583427923,
       "falsePositiveRate": 0.3657289002557545,
-      "f3": 0.33639328421306924,
+      "f3": 0.33814383189420927,
       "tokensPerValidatedFinding": null
     },
     "reportable": {
@@ -52,7 +52,7 @@
     }
   },
   "frameworkSummary": {
-    "flask": { "repositories": 12, "labels": 341, "findings": 147, "precision": 0.7346938775510204, "recall": 0.3698630136986301, "falsePositiveRate": 0.45348837209302323, "f3": 0.38918918918918916 },
+    "flask": { "repositories": 12, "labels": 341, "findings": 150, "precision": 0.74, "recall": 0.3801369863013699, "falsePositiveRate": 0.45348837209302323, "f3": 0.39956803455723544 },
     "django": { "repositories": 22, "labels": 761, "findings": 342, "precision": 0.8070175438596491, "recall": 0.4113263785394933, "falsePositiveRate": 0.43137254901960786, "f3": 0.4325340855665257 },
     "python": { "repositories": 3, "labels": 165, "findings": 19, "precision": 0.7894736842105263, "recall": 0.1079136690647482, "falsePositiveRate": 0.13333333333333333, "f3": 0.11811023622047244 },
     "aiohttp": { "repositories": 1, "labels": 27, "findings": 4, "precision": 1, "recall": 0.17391304347826086, "falsePositiveRate": 0, "f3": 0.1895734597156398 },
@@ -61,10 +61,10 @@
   },
   "comparisonToCheckedInBaseline": {
     "baseline": "benchmark/results/realvuln-v2-aggregate-20260801.json",
-    "candidatePrecision": { "baseline": 0.4637462235649547, "optimized": 0.7957142857142857, "delta": 0.331968062149331 },
-    "candidateRecall": { "baseline": 0.17423382519863792, "optimized": 0.31611804767309876, "delta": 0.14188422247446084 },
+    "candidatePrecision": { "baseline": 0.4637462235649547, "optimized": 0.7965860597439545, "delta": 0.332839836179 },
+    "candidateRecall": { "baseline": 0.17423382519863792, "optimized": 0.3178206583427923, "delta": 0.14358683314415438 },
     "falsePositiveRate": { "baseline": 0.5916666666666667, "optimized": 0.3657289002557545, "delta": -0.22593776641091218 },
-    "f3": { "baseline": 0.1858353510895884, "optimized": 0.33639328421306924, "delta": 0.15055793312348084 }
+    "f3": { "baseline": 0.1858353510895884, "optimized": 0.33814383189420927, "delta": 0.15230848030462088 }
   },
   "blockedRepositories": [
     { "id": "realvuln-owasp-web-playground", "url": "https://github.com/yourrepo/OWASP-Web-Playground", "commit": "5e682aca1b58e03362a5fbd9fc88c37626e429ce", "reason": "PUBLISHED_URL_UNAVAILABLE" },
@@ -77,6 +77,6 @@
     "Blocked entries are excluded from score denominators and are not treated as safe.",
     "The deterministic audit produced zero model tokens; model-backed investigation was not run in this aggregate.",
     "Reportable findings require independent validation, so reportable recall is zero in this run by policy.",
-    "The optimized commit adds Python property/taint semantics, framework-aware policy evidence for Graphene and request handlers, template unsafe-output evidence, session-integrity separation, generated-asset filtering, parameterized-query recognition, and deterministic gap analysis."
+    "The optimized commit adds Python property/taint semantics, framework-aware policy evidence for Graphene and request handlers, GraphQL mutation ownership tracing, template unsafe-output evidence, session-integrity separation, generated-asset filtering, parameterized-query recognition, and deterministic gap analysis."
   ]
 }

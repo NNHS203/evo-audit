@@ -111,25 +111,25 @@ independent runtime validator was supplied.
 
 The reproducible optimized run is [RealVuln v2 optimized aggregate](../benchmark/results/realvuln-v2-aggregate-optimized-20260801.json).
 It uses the same 62 completed repositories, four explicit blocked entries, and
-the same one-to-one scorer, but the `298a812` scanner revision adds Python
-property/taint semantics, framework-aware policy evidence, template unsafe
-output checks, session-integrity separation, generated-asset filtering,
-parameterized-query recognition, Graphene/Tornado auth-surface coverage, and
-gap analysis. It produced 700 candidates: precision `0.796`, recall `0.316`,
-FPR `0.366`, and F3 `0.336`.
+the same one-to-one scorer, but the `a6cf9c8` scanner revision adds Python
+property/taint semantics, framework-aware policy evidence, GraphQL mutation
+ownership tracing, template unsafe-output checks, session-integrity
+separation, generated-asset filtering, parameterized-query recognition,
+Graphene/Tornado auth-surface coverage, and gap analysis. It produced 703
+candidates: precision `0.797`, recall `0.318`, FPR `0.366`, and F3 `0.338`.
 The run used no model or runtime validator, so reportable recall remains `0` by
-policy. This is a precision-focused revision relative to the previous
-candidate-only run: it removes 106 candidates and 103 unmatched candidates
-while retaining nearly the same recall. These are observed improvements over
-the checked-in baseline, not a claim of superiority over OpenAI, Cloudflare,
-or research baselines.
+policy. Relative to the checked-in baseline, true positives increased from
+307 to 560 and false positives decreased from 355 to 143; the candidate count
+changed from 662 to 703. These are observed improvements over the checked-in
+baseline, not a claim of superiority over OpenAI, Cloudflare, or research
+baselines.
 
 The optimized framework breakdown is retained so aggregate wins cannot hide a
 language-specific weakness:
 
 | Framework | Repositories | Labels | Precision | Recall | FPR | F3 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Flask | 12 | 341 | 0.735 | 0.370 | 0.453 | 0.389 |
+| Flask | 12 | 341 | 0.740 | 0.380 | 0.453 | 0.400 |
 | Django | 22 | 761 | 0.807 | 0.411 | 0.431 | 0.433 |
 | FastAPI | 23 | 707 | 0.808 | 0.230 | 0.296 | 0.247 |
 | Tornado | 1 | 17 | 1.000 | 0.786 | 0.000 | 0.803 |
