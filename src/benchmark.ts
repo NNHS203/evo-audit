@@ -7,7 +7,9 @@ import { initWorkspace, runAudit } from "./core.js";
 import { ModelRegistry } from "./models.js";
 import { executeWorkerTask } from "./worker-runner.js";
 import { mergeWorkerResult } from "./workers.js";
-import type { AuditModelConfig, AuditRun, Finding } from "./types.js";
+import { applyValidationResult, createValidationRequest } from "./validator.js";
+import { runValidationRequest } from "./validation-runner.js";
+import type { AuditModelConfig, AuditRun, Finding, ValidationResult } from "./types.js";
 
 export interface BenchmarkExpected {
   vulnerable?: boolean;
@@ -30,6 +32,13 @@ export interface BenchmarkCase {
     path: string;
     repository?: string;
     commit?: string;
+  };
+  validation?: {
+    findingRuleId?: string;
+    reproducerCommand: string;
+    negativeControlCommand: string;
+    timeoutMs?: number;
+    image?: string;
   };
   property: string;
   expected: BenchmarkExpected;
@@ -54,6 +63,7 @@ export interface BenchmarkCaseResult {
   sourceKind: "INLINE" | "CHECKOUT";
   sourceRevision?: string;
   sourceTreeDigest: string;
+  validationOutcome?: ValidationResult["outcome"];
   runId: string;
 }
 
@@ -77,6 +87,7 @@ export interface BenchmarkOptions {
   modelConfig?: AuditModelConfig;
   maxModelTasks?: number;
   manifestPath?: string;
+  validate?: boolean;
 }
 
 export interface BenchmarkManifest {
@@ -237,6 +248,20 @@ async function runCase(item: BenchmarkCase, casesDirectory: string, options: Ben
         run = mergeWorkerResult(run, result);
       }
     }
+    let validationOutcome: ValidationResult["outcome"] | undefined;
+    if (options.validate && item.validation) {
+      const finding = run.findings.find((candidate) => !item.validation?.findingRuleId || candidate.ruleId === item.validation.findingRuleId);
+      if (finding) {
+        const request = createValidationRequest(run, finding, {
+          reproducerCommand: item.validation.reproducerCommand,
+          negativeControlCommand: item.validation.negativeControlCommand,
+          timeoutMs: item.validation.timeoutMs,
+        });
+        const validation = await runValidationRequest(run, { ...request, image: item.validation.image }, "evo-audit-benchmark-validator");
+        run = applyValidationResult(run, validation).run;
+        validationOutcome = validation.outcome;
+      }
+    }
     const durationMs = Math.max(0, Date.now() - startedAt);
     const vulnerable = expectedVulnerable(item.expected);
     const candidateFound = run.findings.length > 0;
@@ -263,6 +288,7 @@ async function runCase(item: BenchmarkCase, casesDirectory: string, options: Ben
       sourceKind: item.source ? "CHECKOUT" : "INLINE",
       sourceRevision,
       sourceTreeDigest: run.snapshot.treeDigest,
+      validationOutcome,
       runId: run.runId,
     };
   } finally {
@@ -308,6 +334,7 @@ export async function runBenchmark(directory: string, split?: string, options: B
       "This runner measures deterministic candidate discovery; it does not claim production vulnerability recall.",
       "A candidate is not a reportable finding until independent validation supplies reproducible evidence.",
       ...(options.model ? [`Model-backed worker mode: ${options.model}; validator execution is still required for reportable evidence.`] : []),
+      ...(options.validate ? ["Benchmark validator mode was requested; BLOCKED means the isolated runtime or reproducer was unavailable, not safe."] : []),
       "Holdout cases must not be used to tune detectors, prompts, or model routing.",
     ],
   };

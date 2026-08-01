@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "caseId": "js-dynamic-validation-001",
+  "split": "development",
+  "language": "javascript",
+  "file": "src/entry.js",
+  "code": "module.exports = { handler(req) { return eval(req.body.code); } };\n",
+  "property": "A reproducible validator can demonstrate dynamic code execution without granting the model verification authority.",
+  "expected": {
+    "vulnerable": true,
+    "ruleId": "JS-DYNAMIC-CODE-001",
+    "minimumReportableEvidence": "T2_REPRODUCIBLE"
+  },
+  "validation": {
+    "findingRuleId": "JS-DYNAMIC-CODE-001",
+    "reproducerCommand": "node -e 'const {handler}=require(\"./src/entry.js\"); delete globalThis.__evo_audit_pwned; handler({body:{code:\"globalThis.__evo_audit_pwned=42\"}}); if (globalThis.__evo_audit_pwned!==42) process.exit(1)'",
+    "negativeControlCommand": "node -e 'const {handler}=require(\"./src/entry.js\"); if (handler({body:{code:\"1+1\"}})!==2) process.exit(1)'",
+    "timeoutMs": 10000,
+    "image": "node:22-alpine"
+  },
+  "notes": [
+    "Run with --validate to exercise the independent container validator.",
+    "A blocked container is reported as blocked and is never scored as safe."
+  ]
+}

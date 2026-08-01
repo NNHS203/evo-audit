@@ -31,6 +31,12 @@
       "caseId": "js-dynamic-safe-constant-001",
       "split": "development",
       "sha256": "2047c6ea144c736974981bdc98fff81075580c6cce5b25670ac78eb0ec4ad553"
+    },
+    {
+      "file": "cases/js-dynamic-validation.json",
+      "caseId": "js-dynamic-validation-001",
+      "split": "development",
+      "sha256": "02637f809fd2078be95f3af0592c503b6e37e1041a378f0c88e57f4293f2e8f7"
     }
   ],
   "notes": [

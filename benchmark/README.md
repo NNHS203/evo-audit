@@ -48,6 +48,10 @@ evo-audit benchmark ./benchmark/cases --split development \
 # Optional: run the same cases through a configured API/OAuth model worker.
 evo-audit benchmark ./benchmark/cases --split development \
   --model auto --config ./audit.models.json --max-model-tasks 8
+
+# Optional: run case-declared reproducers in Docker/Podman isolation.
+evo-audit benchmark ./benchmark/cases --split development \
+  --validate
 ```
 
 The runner creates an isolated temporary workspace for each case, records the
@@ -73,6 +77,12 @@ Model-backed mode reuses the same task protocol, local prompt cache, receipt
 deduplication, and global token budget as a normal review. It still does not
 turn worker output into a reportable vulnerability: a separate validator run
 is required for `T2_REPRODUCIBLE` evidence.
+
+Cases may declare a `validation` block with a `findingRuleId`, positive
+`reproducerCommand`, negative control, timeout, and container image. With
+`--validate`, the runner uses the independent container validator and records
+`VERIFIED`, `REJECTED`, or `BLOCKED`; `BLOCKED` is never converted into a safe
+result.
 
 `benchmark/benchmark-manifest.json` pins every checked-in case by SHA-256,
 split, and case ID. Passing `--manifest` makes accidental case drift fail

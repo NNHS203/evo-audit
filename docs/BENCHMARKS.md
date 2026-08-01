@@ -75,6 +75,11 @@ claims independently reproduced by this repository.
 5. Report multi-run mean and variance for nondeterministic models, and keep
    holdout cases out of prompt, detector, or routing changes.
 
+For cases that declare a validator command, `benchmark --validate` runs the
+positive and negative controls through the same read-only, no-network
+container boundary as normal audit validation. A missing Docker/Podman runtime
+produces `BLOCKED`, not a clean result.
+
 This protocol is the basis for a future cross-language adapter; it prevents a
 larger model, looser evidence policy, or unfinished scan from looking like a
 performance win.
