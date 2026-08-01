@@ -2,7 +2,10 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { initWorkspace, runAudit } from "./core.js";
-import type { AuditRun, Finding } from "./types.js";
+import { ModelRegistry } from "./models.js";
+import { executeWorkerTask } from "./worker-runner.js";
+import { mergeWorkerResult } from "./workers.js";
+import type { AuditModelConfig, AuditRun, Finding } from "./types.js";
 
 export interface BenchmarkExpected {
   vulnerable?: boolean;
@@ -57,6 +60,12 @@ export interface BenchmarkAcceptance {
   failures: string[];
 }
 
+export interface BenchmarkOptions {
+  model?: string;
+  modelConfig?: AuditModelConfig;
+  maxModelTasks?: number;
+}
+
 export interface BenchmarkReport {
   schemaVersion: 1;
   generatedAt: string;
@@ -102,7 +111,7 @@ async function loadCases(directory: string): Promise<BenchmarkCase[]> {
   return cases.sort((left, right) => left.caseId.localeCompare(right.caseId));
 }
 
-async function runCase(item: BenchmarkCase): Promise<BenchmarkCaseResult> {
+async function runCase(item: BenchmarkCase, options: BenchmarkOptions = {}): Promise<BenchmarkCaseResult> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "evo-audit-benchmark-"));
   try {
     await initWorkspace(root);
@@ -110,15 +119,30 @@ async function runCase(item: BenchmarkCase): Promise<BenchmarkCaseResult> {
     await fs.mkdir(path.dirname(path.join(root, sourceFile)), { recursive: true });
     await fs.writeFile(path.join(root, sourceFile), item.code, "utf8");
     const startedAt = Date.now();
-    const result = await runAudit(root, { output: path.join(root, "runs") });
+    const initial = await runAudit(root, { output: path.join(root, "runs") });
+    let run = initial.run;
+    if (options.model) {
+      if (!options.modelConfig) throw new Error("A model config is required for model-backed benchmark runs.");
+      const registry = new ModelRegistry(options.modelConfig);
+      const cacheDirectory = path.join(root, "runs", "worker-cache");
+      const limit = Math.max(1, Math.min(64, Math.floor(options.maxModelTasks ?? 32)));
+      const tasks = (run.plan?.tasks ?? [])
+        .filter((task) => ["HUNT", "INVESTIGATE"].includes(task.phase) && task.status === "PENDING")
+        .sort((left, right) => right.priority - left.priority || left.id.localeCompare(right.id))
+        .slice(0, limit);
+      for (const task of tasks) {
+        const result = await executeWorkerTask(run, task, registry, options.model, { cacheDirectory });
+        run = mergeWorkerResult(run, result);
+      }
+    }
     const durationMs = Math.max(0, Date.now() - startedAt);
     const vulnerable = expectedVulnerable(item.expected);
-    const candidateFound = result.run.findings.length > 0;
+    const candidateFound = run.findings.length > 0;
     const matchingCandidate = item.expected.ruleId
-      ? result.run.findings.some((finding) => finding.ruleId === item.expected.ruleId)
+      ? run.findings.some((finding) => finding.ruleId === item.expected.ruleId)
       : candidateFound;
-    const reportableFinding = (result.run.reportableFindingIds ?? []).some((id) => result.run.findings.some((finding) => finding.id === id));
-    const unsupportedClaim = result.run.findings.some((finding) => finding.status === "VERIFIED" && finding.evidenceTier !== "T2_REPRODUCIBLE");
+    const reportableFinding = (run.reportableFindingIds ?? []).some((id) => run.findings.some((finding) => finding.id === id));
+    const unsupportedClaim = run.findings.some((finding) => finding.status === "VERIFIED" && finding.evidenceTier !== "T2_REPRODUCIBLE");
     return {
       caseId: item.caseId,
       split: item.split,
@@ -129,22 +153,22 @@ async function runCase(item: BenchmarkCase): Promise<BenchmarkCaseResult> {
       falsePositive: !vulnerable && candidateFound,
       reportableFinding,
       unsupportedClaim,
-      findings: result.run.findings.map(({ ruleId, status, evidenceTier, locations }) => ({ ruleId, status, evidenceTier, locations })),
-      coverageUnknown: result.run.plan?.tasks.some((task) => task.phase === "HUNT" && task.status !== "COMPLETED") ?? true,
-      tokenTotal: result.run.tokenAccounting.inputTokens + result.run.tokenAccounting.outputTokens,
+      findings: run.findings.map(({ ruleId, status, evidenceTier, locations }) => ({ ruleId, status, evidenceTier, locations })),
+      coverageUnknown: run.plan?.tasks.some((task) => task.phase === "HUNT" && task.status !== "COMPLETED") ?? true,
+      tokenTotal: run.tokenAccounting.inputTokens + run.tokenAccounting.outputTokens,
       durationMs,
-      runId: result.run.runId,
+      runId: run.runId,
     };
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
 }
 
-export async function runBenchmark(directory: string, split?: string): Promise<BenchmarkReport> {
+export async function runBenchmark(directory: string, split?: string, options: BenchmarkOptions = {}): Promise<BenchmarkReport> {
   const cases = (await loadCases(directory)).filter((item) => !split || item.split === split);
   if (cases.length === 0) throw new Error(`No benchmark cases found${split ? ` for split ${split}` : ""}.`);
   const results: BenchmarkCaseResult[] = [];
-  for (const item of cases) results.push(await runCase(item));
+  for (const item of cases) results.push(await runCase(item, options));
   const expected = results.filter((item) => item.expectedVulnerable);
   const reported = results.filter((item) => item.candidateFound);
   const matching = expected.filter((item) => item.matchingCandidate);
@@ -175,6 +199,7 @@ export async function runBenchmark(directory: string, split?: string): Promise<B
     notes: [
       "This runner measures deterministic candidate discovery; it does not claim production vulnerability recall.",
       "A candidate is not a reportable finding until independent validation supplies reproducible evidence.",
+      ...(options.model ? [`Model-backed worker mode: ${options.model}; validator execution is still required for reportable evidence.`] : []),
       "Holdout cases must not be used to tune detectors, prompts, or model routing.",
     ],
   };

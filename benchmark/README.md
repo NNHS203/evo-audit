@@ -43,6 +43,10 @@ evo-audit benchmark ./benchmark/cases
 evo-audit benchmark ./benchmark/cases --split development --json
 evo-audit benchmark ./benchmark/cases --split development \
   --min-recall 1 --min-precision 1 --max-fpr 0
+
+# Optional: run the same cases through a configured API/OAuth model worker.
+evo-audit benchmark ./benchmark/cases --split development \
+  --model auto --config ./audit.models.json --max-model-tasks 8
 ```
 
 The runner creates an isolated temporary workspace for each case, records the
@@ -63,3 +67,8 @@ The report also exposes `reportableRecall`, `validatedFindingRate`,
 runner is expected to report zero reportable recall until an independent
 validator result is applied; that zero is a useful guard against accidentally
 scoring static candidates as closed vulnerabilities.
+
+Model-backed mode reuses the same task protocol, local prompt cache, receipt
+deduplication, and global token budget as a normal review. It still does not
+turn worker output into a reportable vulnerability: a separate validator run
+is required for `T2_REPRODUCIBLE` evidence.

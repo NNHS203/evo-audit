@@ -36,7 +36,7 @@ Commands:
   ingest <run.json> <worker.json>     Merge a Frontier worker result into a saved run
   worker <run.json> <task-id>         Run one HUNT/INVESTIGATE task with a configured model
   worker <run.json> --all             Run pending worker tasks with bounded concurrency
-  benchmark <cases-dir>               Run deterministic benchmark cases
+  benchmark <cases-dir>               Run benchmark cases (optional --model auto)
   evolve <run.json> [--output FILE]   Propose playbook improvements from audit gaps
   report <run.json> [--format FORMAT] Print text, json, or sarif
 
@@ -78,7 +78,13 @@ async function main(): Promise<void> {
 
   if (command === "benchmark") {
     if (!input) throw new Error("benchmark requires a cases directory");
-    const report = await runBenchmark(path.resolve(cwd, input), valueFlag(args, "--split", "") || undefined);
+    const requestedModel = valueFlag(args, "--model", "");
+    const modelConfig = requestedModel ? await loadModelConfig(cwd, valueFlag(args, "--config", "")) : undefined;
+    const report = await runBenchmark(path.resolve(cwd, input), valueFlag(args, "--split", "") || undefined, {
+      model: requestedModel || undefined,
+      modelConfig,
+      maxModelTasks: numberFlag(args, "--max-model-tasks"),
+    });
     const acceptance = evaluateBenchmark(report, {
       minCandidateRecall: numberFlag(args, "--min-recall"),
       minCandidatePrecision: numberFlag(args, "--min-precision"),

@@ -18,7 +18,7 @@ import { workerResultFromCompletion } from "../src/worker-runner.js";
 import { runValidationRequest } from "../src/validation-runner.js";
 import { deduplicateRun } from "../src/dedup.js";
 import { buildRevalidationPlan } from "../src/revalidation.js";
-import { evaluateBenchmark, type BenchmarkReport } from "../src/benchmark.js";
+import { evaluateBenchmark, runBenchmark, type BenchmarkReport } from "../src/benchmark.js";
 
 test("candidate detection masks fixtures, comments, and descriptions but keeps code", () => {
   const source = [
@@ -658,4 +658,30 @@ test("benchmark acceptance gate is explicit about metric regressions", () => {
   } satisfies BenchmarkReport;
   assert.equal(evaluateBenchmark(report, { minCandidateRecall: 1, minCandidatePrecision: 0.9, maxFalsePositiveRate: 0, minReportableRecall: 1 }).accepted, false);
   assert.equal(evaluateBenchmark(report, { minCandidateRecall: 1, minCandidatePrecision: 0.5, maxFalsePositiveRate: 0.5 }).accepted, true);
+});
+
+test("model-backed benchmark reuses the same bounded worker protocol", async () => {
+  const server = createServer((_request, response) => {
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ id: "benchmark-worker", choices: [{ message: { content: "{\"findings\":[],\"notes\":[\"no candidate\"]}" }, finish_reason: "stop" }], usage: { prompt_tokens: 30, completion_tokens: 6 } }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  try {
+    const report = await runBenchmark(path.join(process.cwd(), "benchmark", "cases"), "development", {
+      model: "local",
+      maxModelTasks: 1,
+      modelConfig: {
+        schemaVersion: 1,
+        auto: { enabled: true, preferred: ["local"], minimumQualityTier: 1 },
+        models: [{ id: "local", transport: "OPENAI_COMPATIBLE", model: "test", baseUrl: `http://127.0.0.1:${address.port}`, auth: { method: "NONE" }, qualityTier: 3, capabilities: ["HUNT", "INVESTIGATE", "JSON"] }],
+      },
+    });
+    assert.equal(report.notes.some((note) => /model-backed worker mode/i.test(note)), true);
+    assert.equal(report.cases.every((item) => item.tokenTotal > 0), true);
+    assert.equal(report.metrics.reportableRecall, 0);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
 });
