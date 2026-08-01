@@ -66,6 +66,21 @@ Reports support `text`, `json`, and `sarif` formats. SARIF results include
 stable root-cause fingerprints so downstream code-scanning systems can track
 findings even when line numbers move.
 
+## Token usage
+
+An audit session is the output directory (`audit-runs/` by default). Evo Audit
+persists `session.json` there and prints both the current run usage and the
+session total after `review`, `ingest`, and `validate`:
+
+```text
+Tokens: current total=1500 (input=1200, output=300, cached=100)
+Session total: total=1500 (...) across 1 run(s)
+```
+
+Updating the same run replaces its previous contribution, so replaying an
+ingest or validation does not double-count tokens. `totalTokens` is defined as
+input plus output; cached tokens are shown separately for transparency.
+
 ## Optimized worker loop
 
 Workers should consume one plan task at a time:

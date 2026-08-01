@@ -191,12 +191,34 @@ export interface TokenAccounting {
   source: "DETERMINISTIC" | "WORKER_REPORTED" | "UNKNOWN";
 }
 
+export interface TokenUsageTotals {
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  totalTokens: number;
+  estimatedCostUsd: number;
+}
+
+export interface AuditSessionUsage {
+  schemaVersion: 1;
+  sessionId: string;
+  root: string;
+  startedAt: string;
+  updatedAt: string;
+  total: TokenUsageTotals;
+  runs: Array<{
+    runId: string;
+    usage: TokenUsageTotals;
+  }>;
+}
+
 export interface AuditRun {
   schemaVersion: 1;
   runId: string;
   startedAt: string;
   completedAt: string;
   root: string;
+  sessionId?: string;
   baseline: string | null;
   head: string | null;
   mode: "WORKTREE" | "DIFF" | "PATH";

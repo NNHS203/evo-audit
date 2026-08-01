@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { detectFindings, maskNonCode } from "../src/detectors.js";
 import { compareRuns } from "../src/compare.js";
-import { initWorkspace, readJson, runAudit } from "../src/core.js";
+import { initWorkspace, persistRunArtifacts, readJson, runAudit } from "../src/core.js";
 import { defaultPlaybook } from "../src/playbook.js";
 import { buildResumePlan } from "../src/resume.js";
 import { toSarif } from "../src/sarif.js";
@@ -55,6 +55,19 @@ test("run persists replayable evidence artifacts", async () => {
   assert.equal(run.semanticDelta.basis, "FULL_SCAN");
   assert.deepEqual(run.semanticDelta.changed, ["app.ts"]);
   assert.deepEqual(run.reportableFindingIds, [run.findings[0].id]);
+
+  const initialSession = await readJson<{ total: { totalTokens: number }; runs: unknown[] }>(path.join(output, "session.json"));
+  assert.equal(initialSession.total.totalTokens, 0);
+  const workerUpdated = mergeWorkerResult(run, {
+    worker: "usage-worker",
+    findings: [],
+    tokenAccounting: { inputTokens: 1200, outputTokens: 300, cachedTokens: 100, estimatedCostUsd: 0.04 },
+  });
+  const sessionAfterWorker = await persistRunArtifacts(artifactDir, workerUpdated);
+  assert.equal(sessionAfterWorker.total.totalTokens, 1500);
+  assert.equal(sessionAfterWorker.runs.length, 1);
+  const sessionAfterReplay = await persistRunArtifacts(artifactDir, workerUpdated);
+  assert.equal(sessionAfterReplay.total.totalTokens, 1500);
 
   const persisted = await readJson<AuditRun>(path.join(artifactDir, "run.json"));
   assert.equal(persisted.runId, run.runId);

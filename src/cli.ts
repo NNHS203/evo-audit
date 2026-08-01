@@ -63,7 +63,7 @@ async function main(): Promise<void> {
     const baseline = baselinePath ? await readJson<AuditRun>(path.resolve(cwd, baselinePath)) : undefined;
     const strict = flag(args, "--strict");
     const result = await runAudit(target, { output, strict, baseline });
-    console.log(summarizeRun(result.run, strict ? { findingIds: result.run.reportableFindingIds } : {}));
+    console.log(summarizeRun(result.run, strict ? { findingIds: result.run.reportableFindingIds, session: result.session } : { session: result.session }));
     console.log(`Artifacts: ${result.artifactDir}`);
     return;
   }
@@ -107,9 +107,9 @@ async function main(): Promise<void> {
           notes: [...(validation.notes ?? []), `Workspace changed after snapshot: ${integrity.changed.join(", ")}`],
         };
     const applied = applyValidationResult(originalRun, checkedResult);
-    await persistRunArtifacts(path.dirname(runPath), applied.run);
+    const session = await persistRunArtifacts(path.dirname(runPath), applied.run);
     console.log(`${applied.gate.status}: ${applied.gate.reason}`);
-    console.log(summarizeRun(applied.run));
+    console.log(summarizeRun(applied.run, { session }));
     return;
   }
 
@@ -170,8 +170,8 @@ async function main(): Promise<void> {
     const runPath = path.resolve(cwd, input);
     const worker = await readJson<AuditWorkerResult>(path.resolve(cwd, secondInput));
     const run = mergeWorkerResult(await readJson<AuditRun>(runPath), worker);
-    await persistRunArtifacts(path.dirname(runPath), run);
-    console.log(summarizeRun(run));
+    const session = await persistRunArtifacts(path.dirname(runPath), run);
+    console.log(summarizeRun(run, { session }));
     console.log(`Updated: ${runPath}`);
     return;
   }

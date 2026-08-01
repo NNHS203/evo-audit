@@ -4,12 +4,14 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { defaultConfig, defaultPlaybook } from "./playbook.js";
 import { detectFindings } from "./detectors.js";
+import { formatTokenUsage, recordSessionUsage, tokenUsageTotals } from "./usage.js";
 import { buildAuditPlan, buildAuditRecon, planSummary } from "./workflow.js";
 import type {
   AuditConfig,
   AuditObligation,
   AuditPlaybook,
   AuditRun,
+  AuditSessionUsage,
   SemanticDelta,
   FileFingerprint,
   Finding,
@@ -139,7 +141,7 @@ function computeSemanticDelta(files: FileFingerprint[], baseline: AuditRun | und
   };
 }
 
-export async function runAudit(rootInput: string, options: { output: string; strict?: boolean; baseline?: AuditRun }): Promise<{ run: AuditRun; artifactDir: string }> {
+export async function runAudit(rootInput: string, options: { output: string; strict?: boolean; baseline?: AuditRun }): Promise<{ run: AuditRun; artifactDir: string; session: AuditSessionUsage }> {
   const root = path.resolve(rootInput);
   const config = await loadConfig(root);
   const playbook = await loadPlaybook(root, config);
@@ -218,11 +220,11 @@ export async function runAudit(rootInput: string, options: { output: string; str
   run.notes.push(`Workflow plan: ${run.plan.tasks.length} tasks, ${run.plan.allocatedTokens}/${run.plan.tokenBudget} investigation tokens allocated.`);
 
   const artifactDir = path.resolve(options.output, runId);
-  await persistRunArtifacts(artifactDir, run);
-  return { run, artifactDir };
+  const session = await persistRunArtifacts(artifactDir, run);
+  return { run, artifactDir, session };
 }
 
-export function summarizeRun(run: AuditRun, options: { findingIds?: string[] } = {}): string {
+export function summarizeRun(run: AuditRun, options: { findingIds?: string[]; session?: AuditSessionUsage } = {}): string {
   const visibleIds = options.findingIds ? new Set(options.findingIds) : null;
   const visibleFindings = visibleIds ? run.findings.filter((finding) => visibleIds.has(finding.id)) : run.findings;
   const counts = new Map<string, number>();
@@ -235,9 +237,10 @@ export function summarizeRun(run: AuditRun, options: { findingIds?: string[] } =
     `Run ${run.runId}`,
     `Mode: ${run.mode}  Files: ${run.files.length}  Obligations: ${run.obligations.length}`,
     `Findings: ${countText || "none"}`,
-    `Tokens: ${run.tokenAccounting.inputTokens} in / ${run.tokenAccounting.outputTokens} out (source=${run.tokenAccounting.source})`,
+    `Tokens: current ${formatTokenUsage(tokenUsageTotals(run.tokenAccounting))} (source=${run.tokenAccounting.source})`,
     planSummary(run.plan),
   ];
+  if (options.session) lines.push(`Session total: ${formatTokenUsage(options.session.total)} across ${options.session.runs.length} run(s) (session=${options.session.sessionId})`);
   for (const finding of visibleFindings) {
     const location = finding.locations[0];
     const locationText = location ? `${location.file}:${location.line}` : "<unmapped>";
@@ -250,7 +253,9 @@ export function resolveInput(root: string, input: string | undefined): string {
   return path.resolve(root, input ?? ".");
 }
 
-export async function persistRunArtifacts(artifactDir: string, run: AuditRun): Promise<void> {
+export async function persistRunArtifacts(artifactDir: string, run: AuditRun): Promise<AuditSessionUsage> {
+  const session = await recordSessionUsage(path.dirname(artifactDir), run);
+  run.sessionId = session.sessionId;
   await writeJson(path.join(artifactDir, "run.json"), run);
   await writeJson(path.join(artifactDir, "findings.json"), run.findings);
   await writeJson(path.join(artifactDir, "obligations.json"), run.obligations);
@@ -259,6 +264,7 @@ export async function persistRunArtifacts(artifactDir: string, run: AuditRun): P
   await writeJson(path.join(artifactDir, "manifest.json"), {
     schemaVersion: 1,
     runId: run.runId,
+    sessionId: run.sessionId,
     files: run.files,
     snapshot: run.snapshot,
     coverage: run.coverage,
@@ -269,4 +275,5 @@ export async function persistRunArtifacts(artifactDir: string, run: AuditRun): P
     playbook: run.playbook,
     tokenAccounting: run.tokenAccounting,
   });
+  return session;
 }
