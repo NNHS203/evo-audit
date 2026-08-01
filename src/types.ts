@@ -159,6 +159,8 @@ export interface FileFingerprint {
   path: string;
   sha256: string;
   bytes: number;
+  /** Optional schema-v1 metadata used to reject impossible model locations. */
+  lineCount?: number;
 }
 
 export interface SemanticDelta {

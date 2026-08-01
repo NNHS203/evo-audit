@@ -163,8 +163,8 @@ export async function runAudit(rootInput: string, options: { output: string; str
 
   for (const relative of relativeFiles) {
     const buffer = await fs.readFile(path.join(root, relative));
-    files.push({ path: relative, sha256: sha256(buffer), bytes: buffer.byteLength });
     const content = buffer.toString("utf8");
+    files.push({ path: relative, sha256: sha256(buffer), bytes: buffer.byteLength, lineCount: content.split(/\r?\n/).length });
     sourceContents.set(relative, content);
     const result = detectFindings(relative, content, playbook, runId);
     allFindings.push(...result.findings);

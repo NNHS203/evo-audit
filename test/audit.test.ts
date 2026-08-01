@@ -335,6 +335,25 @@ test("worker validation proposals remain inert and bounded", async () => {
     usage: { inputTokens: 20, outputTokens: 12, cachedTokens: 0, estimatedCostUsd: 0, source: "WORKER_REPORTED" },
   }, task);
   assert.equal(bounded.findings[0].proposedValidation, undefined);
+
+  const impossible = workerResultFromCompletion({
+    requestId: "proposal-3",
+    modelId: "test-model",
+    providerModel: "test",
+    text: JSON.stringify({ findings: [{
+      ruleId: "MODEL-CANDIDATE-003",
+      title: "Impossible location",
+      status: "SUPPORTED",
+      evidenceTier: "T1_STATIC_PATH",
+      locations: [{ file: "safe.ts", line: 99, column: 1, endLine: 99, snippet: "not in snapshot" }],
+    }] }),
+    usage: { inputTokens: 20, outputTokens: 12, cachedTokens: 0, estimatedCostUsd: 0, source: "WORKER_REPORTED" },
+  }, task);
+  const sanitized = mergeWorkerResult(run, impossible);
+  const impossibleFinding = sanitized.findings.find((finding) => finding.ruleId === "MODEL-CANDIDATE-003");
+  assert.ok(impossibleFinding);
+  assert.deepEqual(impossibleFinding.locations, []);
+  assert.match(impossibleFinding.limitations.join(" "), /outside the fingerprinted snapshot|line count/i);
 });
 
 test("pending worker queue runs HUNT before a bounded INVESTIGATE pass", async () => {

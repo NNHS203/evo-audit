@@ -40,6 +40,14 @@ function locationsKey(locations: SourceLocation[] | undefined): string {
   return (locations ?? []).map(locationKey).sort().join(",");
 }
 
+function locationInSnapshot(run: AuditRun, location: SourceLocation): boolean {
+  const file = run.files.find((candidate) => candidate.path === location.file);
+  if (!file) return false;
+  if (!Number.isInteger(location.line) || !Number.isInteger(location.endLine) || location.line < 1 || location.endLine < location.line) return false;
+  if (file.lineCount !== undefined && location.endLine > file.lineCount) return false;
+  return Number.isInteger(location.column) && location.column > 0;
+}
+
 function evidenceKey(item: EvidenceItem): string {
   return `${item.type}|${item.title}|${item.detail}|${(item.locations ?? []).map(locationKey).sort().join(",")}`;
 }
@@ -156,8 +164,10 @@ function createWorkerObligation(run: AuditRun, result: AuditWorkerResult, findin
 function mergeFinding(run: AuditRun, result: AuditWorkerResult, candidate: AuditWorkerResult["findings"][number]): Finding {
   const existing = matchingFinding(run.findings, result, candidate);
   const evidence = uniqueEvidence([...(existing?.evidence ?? []), ...(candidate.evidence ?? [])]);
-  const locations = candidate.locations ?? existing?.locations ?? [];
-  const scopeValid = locations.length > 0 && locations.every((location) => run.files.some((file) => file.path === location.file));
+  const proposedLocations = candidate.locations && candidate.locations.length > 0 ? candidate.locations : existing?.locations ?? [];
+  const locations = proposedLocations.filter((location) => locationInSnapshot(run, location));
+  const droppedLocations = proposedLocations.length - locations.length;
+  const scopeValid = locations.length > 0 && locations.every((location) => locationInSnapshot(run, location));
   const workerClaim = workerClaimGate(candidate.status, candidate.evidenceTier, evidence);
   const claim = gateClaim(workerClaim.status, workerClaim.evidenceTier, evidence, scopeValid);
   const limitation = [workerClaim.limitation, claim.limitation].filter((item): item is EvidenceItem => Boolean(item));
@@ -184,6 +194,7 @@ function mergeFinding(run: AuditRun, result: AuditWorkerResult, candidate: Audit
       ...(existing?.limitations ?? []),
       ...(candidate.limitations ?? []),
       ...(claim.limitation ? [claim.limitation.detail] : []),
+      ...(droppedLocations > 0 ? [`${droppedLocations} worker location(s) were outside the fingerprinted snapshot or beyond its recorded line count.`] : []),
     ]),
     proposedValidation: candidate.proposedValidation ?? existing?.proposedValidation,
     worker: result.worker,
