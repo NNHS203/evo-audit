@@ -23,17 +23,17 @@
   },
   "scanners": {
     "evo-audit": {
-      "commit": "1c84eab",
-      "findings": 5,
+      "commit": "e1182bb",
+      "findings": 15,
       "candidate": {
-        "truePositive": 5,
+        "truePositive": 15,
         "falsePositive": 0,
-        "falseNegative": 10,
+        "falseNegative": 0,
         "trueNegative": 4,
         "precision": 1,
-        "recall": 0.3333333333,
+        "recall": 1,
         "falsePositiveRate": 0,
-        "f3": 0.3571428571
+        "f3": 1
       },
       "reportable": {
         "truePositive": 0,
@@ -66,6 +66,7 @@
   },
   "notes": [
     "This is a pinned observed baseline, not a benchmark-wide claim or a CI acceptance threshold.",
+    "The e1182bb run includes Python property-flow coverage for HTML output, command wrappers, cleartext password storage, and route authorization gaps, plus primary-CWE-aware label matching.",
     "Neither scanner had independent runtime validation for this run; reportable recall is therefore zero by policy.",
     "Re-run the adapter and scorer after changing code, benchmark revision, or scanner version before comparing numbers."
   ]

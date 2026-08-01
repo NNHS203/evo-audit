@@ -52,10 +52,13 @@ version and execution policy.
 One pinned observed snapshot is checked in at
 [`benchmark/results/realvuln-damn-vulnerable-flask-v2-20260801.json`](../benchmark/results/realvuln-damn-vulnerable-flask-v2-20260801.json).
 It is deliberately marked `OBSERVED_BASELINE`, not a CI gate: on the same
-15-vulnerability/4-trap Flask checkout, Evo Audit measured candidate
-precision 1.000, recall 0.333, FPR 0, F3 0.357; Bandit 1.9.4 measured precision
+15-vulnerability/4-trap Flask checkout, Evo Audit commit `e1182bb` measured
+candidate precision 1.000, recall 1.000, FPR 0, F3 1.000 after adding
+property-flow coverage and primary-CWE-aware matching; Bandit 1.9.4 measured precision
 0.200, recall 0.067, FPR 0.500, F3 0.071. Neither result counts as reportable
-without independent validation.
+without independent validation. This is one pinned Python target, not a
+benchmark-wide or frontier-wide superiority claim; more repositories and
+independent validators are required before generalizing it.
 
 For a local pinned checkout, a case can use a source reference instead of
 embedding code:
