@@ -110,6 +110,69 @@
       "enabled": true
     },
     {
+      "id": "PY-SENSITIVE-DATA-EXPOSURE-001",
+      "title": "Python response exposes sensitive or debug data",
+      "description": "A response path uses a debug serializer or sensitive record shape. Endpoint reachability and authorization must be verified independently.",
+      "severity": "HIGH",
+      "evidenceRequired": "T2_REPRODUCIBLE",
+      "globs": ["**/*.py"],
+      "enabled": true
+    },
+    {
+      "id": "PY-ERROR-DISCLOSURE-001",
+      "title": "Python response exposes internal validation detail",
+      "description": "Validation exception detail appears to flow into a client-facing response.",
+      "severity": "MEDIUM",
+      "evidenceRequired": "T2_REPRODUCIBLE",
+      "globs": ["**/*.py"],
+      "enabled": true
+    },
+    {
+      "id": "PY-MASS-ASSIGNMENT-001",
+      "title": "Request-controlled data reaches a privileged Python attribute",
+      "description": "A privilege-bearing field appears to be accepted from a request body without an observed field allowlist.",
+      "severity": "HIGH",
+      "evidenceRequired": "T2_REPRODUCIBLE",
+      "globs": ["**/*.py"],
+      "enabled": true
+    },
+    {
+      "id": "PY-IDOR-001",
+      "title": "Python object lookup uses a caller-controlled identifier without an owner constraint",
+      "description": "A path-like identifier appears to select an object without binding the query to the authenticated subject.",
+      "severity": "HIGH",
+      "evidenceRequired": "T2_REPRODUCIBLE",
+      "globs": ["**/*.py"],
+      "enabled": true
+    },
+    {
+      "id": "PY-USER-ENUMERATION-001",
+      "title": "Python authentication flow reveals account existence",
+      "description": "Distinct authentication responses may reveal whether a username or account exists.",
+      "severity": "MEDIUM",
+      "evidenceRequired": "T2_REPRODUCIBLE",
+      "globs": ["**/*.py"],
+      "enabled": true
+    },
+    {
+      "id": "PY-RATE-LIMIT-001",
+      "title": "Python API surface lacks an observed rate-limiting boundary",
+      "description": "An API registration call has no local rate-limiting evidence; gateway and deployment controls must be checked.",
+      "severity": "MEDIUM",
+      "evidenceRequired": "T2_REPRODUCIBLE",
+      "globs": ["**/*.py"],
+      "enabled": true
+    },
+    {
+      "id": "PY-REGEX-DOS-001",
+      "title": "User-influenced Python regex may backtrack catastrophically",
+      "description": "A regex with nested quantifiers appears on a request-processing path and may enable denial of service.",
+      "severity": "HIGH",
+      "evidenceRequired": "T2_REPRODUCIBLE",
+      "globs": ["**/*.py"],
+      "enabled": true
+    },
+    {
       "id": "PY-COMMAND-INJECTION-001",
       "title": "Request or user input reaches a Python command execution API",
       "description": "A request-controlled value appears in os.system, os.popen, or subprocess execution. A verifier must prove attacker reachability and command impact.",

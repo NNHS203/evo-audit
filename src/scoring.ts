@@ -279,6 +279,13 @@ function ruleAliases(ruleId: string): string[] {
   if (ruleId.includes("REFLECTED-XSS")) return ["CWE-79", "CWE-80"];
   if (ruleId.includes("CLEARTEXT-PASSWORD")) return ["CWE-256", "CWE-257", "CWE-522", "CWE-312"];
   if (ruleId.includes("MISSING-AUTH")) return ["CWE-306", "CWE-862", "CWE-287", "CWE-284"];
+  if (ruleId.includes("SENSITIVE-DATA-EXPOSURE")) return ["CWE-200"];
+  if (ruleId.includes("ERROR-DISCLOSURE")) return ["CWE-209"];
+  if (ruleId.includes("MASS-ASSIGNMENT")) return ["CWE-915"];
+  if (ruleId.includes("IDOR")) return ["CWE-639"];
+  if (ruleId.includes("USER-ENUMERATION")) return ["CWE-204"];
+  if (ruleId.includes("RATE-LIMIT")) return ["CWE-770"];
+  if (ruleId.includes("REGEX-DOS")) return ["CWE-1333"];
   if (ruleId.includes("PATH-TRAVERSAL")) return ["CWE-22"];
   if (ruleId.includes("HARDCODED-CREDENTIAL")) return ["CWE-798", "CWE-259", "CWE-321"];
   if (ruleId.includes("DEBUG-MODE")) return ["CWE-215", "CWE-489", "CWE-16"];

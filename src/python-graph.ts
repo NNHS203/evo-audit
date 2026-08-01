@@ -149,7 +149,7 @@ function namesIn(text: string, names: Iterable<string>): string[] {
 }
 
 function boundaryParameter(name: string): boolean {
-  return /^(?:request|req|ctx|context|user_input|raw_input|input|payload|query|params|body|url|command|cmd|filename)$/i.test(name);
+  return /^(?:request|req|ctx|context|user_input|raw_input|input|payload|query|params|body|url|command|cmd|filename|username|user_id|book_title|title|slug|identifier|email)$/i.test(name);
 }
 
 function linePosition(line: number, offset: number): { line: number; column: number; endLine: number } {
@@ -263,6 +263,7 @@ function buildPythonFile(state: FragmentState, file: FileFingerprint, content: s
   const lines = maskPython(content).split(/\r?\n/);
   const functions = findFunctions(normalizedFile, lines);
   const webContext = /\b(?:flask|django|fastapi|starlette|bottle|render_template|request)\b/i.test(content);
+  const htmlContext = webContext && (/<\s*(?:html|body|br|form|script|iframe|img|a|p|div|span|h[1-6]|li|ul|ol|table|textarea)\b/i.test(content) || /\brender_template_string\s*\(/i.test(content));
   for (const fn of functions) {
     addNode(state, normalizedFile, fn.line, fn.indent + 1, "FUNCTION", fn.name, "Python function scope used for bounded source-to-sink analysis.", rawLines[fn.line - 1] ?? "");
     addEdge(state, { from: fileNodeId(normalizedFile), to: fn.nodeId, kind: "CONTAINS", confidence: "HIGH" });
@@ -320,14 +321,21 @@ function buildPythonFile(state: FragmentState, file: FileFingerprint, content: s
       if (assignment) {
         const name = assignment[1];
         const expression = assignment[2];
+        const rawAssignment = raw.match(/^\s*[A-Za-z_]\w*\s*=\s*(?![=])(.+)$/)?.[1] ?? raw;
         const origins = new Set<string>();
         for (const source of sourceMatches(expression)) {
           const sourceId = addNode(state, normalizedFile, lineIndex + 1, masked.indexOf(source.text) + 1, "SOURCE", source.text.trim(), "Attacker-controlled or environment-derived Python input.", raw);
           origins.add(sourceId);
         }
         for (const variable of namesIn(expression, stateByName.origins.keys())) for (const origin of stateByName.origins.get(variable) ?? []) origins.add(origin);
+        for (const interpolation of rawAssignment.matchAll(/\{\s*([A-Za-z_]\w*)\s*[^}]*\}/g)) {
+          for (const origin of stateByName.origins.get(interpolation[1]) ?? []) origins.add(origin);
+        }
         const parameters = new Set<string>();
         for (const variable of namesIn(expression, stateByName.parameters.keys())) for (const parameter of stateByName.parameters.get(variable) ?? []) parameters.add(parameter);
+        for (const interpolation of rawAssignment.matchAll(/\{\s*([A-Za-z_]\w*)\s*[^}]*\}/g)) {
+          for (const parameter of stateByName.parameters.get(interpolation[1]) ?? []) parameters.add(parameter);
+        }
         if (origins.size > 0 || parameters.size > 0) {
           const variableId = addNode(state, normalizedFile, lineIndex + 1, Math.max(1, masked.indexOf(name) + 1), "VARIABLE", name, "Python value carrying boundary taint.", raw);
           stateByName.origins.set(name, origins);
@@ -339,7 +347,7 @@ function buildPythonFile(state: FragmentState, file: FileFingerprint, content: s
 
       if (!masked.trim()) continue;
 
-      for (const sink of sinkMatches(masked, webContext)) {
+      for (const sink of sinkMatches(masked, htmlContext)) {
         const callNodeId = addNode(state, normalizedFile, lineIndex + 1, sink.index + 1, "CALL", sink.text.replace(/\s*\($/, ""), "Python call expression discovered by the source-to-sink graph.", raw);
         addEdge(state, { from: currentFunction?.nodeId ?? fileNodeId(normalizedFile), to: callNodeId, kind: "CALLS", confidence: "MEDIUM", label: sink.text });
         const sinkNodeId = addNode(state, normalizedFile, lineIndex + 1, sink.index + 1, "SINK", sink.text.replace(/\s*\($/, ""), sinkRuleKind(sink.kind), raw);
