@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "status": "OBSERVED_HOLDOUT",
+  "benchmark": "RealVuln",
+  "benchmarkVersion": "2.0.0",
+  "groundTruthVersion": "2.0.0",
+  "benchmarkRepositoryRevision": "98872da5caa25eb4d4bc7d5b93e10e08148a2049",
+  "scanner": "evo-audit",
+  "scannerCommit": "91539d12e1ac238543dba73d2679bc6d68a3ef5d",
+  "execution": {
+    "manifestRepositories": 66,
+    "completedRepositories": 62,
+    "blockedRepositories": 4,
+    "independentValidator": false,
+    "runtimeValidation": "NOT_RUN",
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "durationMs": 0
+  },
+  "aggregate": {
+    "labels": 2018,
+    "vulnerableLabels": 1762,
+    "safeLabels": 256,
+    "findings": 662,
+    "unsupportedClaimCount": 0,
+    "unsupportedClaimRate": 0,
+    "candidate": {
+      "truePositive": 307,
+      "falsePositive": 355,
+      "falseNegative": 1455,
+      "trueNegative": 245,
+      "candidateCount": 662,
+      "validatedCount": 0,
+      "precision": 0.4637462235649547,
+      "recall": 0.17423382519863792,
+      "falsePositiveRate": 0.5916666666666667,
+      "f3": 0.1858353510895884,
+      "tokensPerValidatedFinding": null
+    },
+    "reportable": {
+      "truePositive": 0,
+      "falsePositive": 0,
+      "falseNegative": 1762,
+      "trueNegative": 256,
+      "candidateCount": 0,
+      "validatedCount": 0,
+      "precision": 0,
+      "recall": 0,
+      "falsePositiveRate": 0,
+      "f3": 0,
+      "tokensPerValidatedFinding": null
+    }
+  },
+  "frameworkSummary": {
+    "flask": { "repositories": 12, "labels": 341, "findings": 176, "precision": 0.4659090909090909, "recall": 0.2808219178082192, "falsePositiveRate": 0.6911764705882353, "f3": 0.2924393723252497 },
+    "django": { "repositories": 22, "labels": 761, "findings": 356, "precision": 0.41292134831460675, "recall": 0.21907600596125187, "falsePositiveRate": 0.706081081081081, "f3": 0.22986708365910868 },
+    "python": { "repositories": 3, "labels": 165, "findings": 19, "precision": 0.42105263157894735, "recall": 0.05755395683453238, "falsePositiveRate": 0.2972972972972973, "f3": 0.06299212598425197 },
+    "aiohttp": { "repositories": 1, "labels": 27, "findings": 2, "precision": 0.5, "recall": 0.043478260869565216, "falsePositiveRate": 0.2, "f3": 0.04784688995215311 },
+    "fastapi": { "repositories": 23, "labels": 707, "findings": 101, "precision": 0.6039603960396039, "recall": 0.09791332263242375, "falsePositiveRate": 0.3252032520325203, "f3": 0.10686755430974071 },
+    "tornado": { "repositories": 1, "labels": 17, "findings": 8, "precision": 1, "recall": 0.5714285714285714, "falsePositiveRate": 0, "f3": 0.5970149253731343 }
+  },
+  "blockedRepositories": [
+    { "id": "realvuln-owasp-web-playground", "url": "https://github.com/yourrepo/OWASP-Web-Playground", "commit": "5e682aca1b58e03362a5fbd9fc88c37626e429ce", "reason": "PUBLISHED_URL_UNAVAILABLE" },
+    { "id": "realvuln-pygoat", "url": "https://github.com/OWASP/PyGoat", "commit": "2fb0c600245f50670e8b9233c784afe61e8b340b", "reason": "PUBLISHED_URL_UNAVAILABLE" },
+    { "id": "realvuln-python-app", "url": "https://github.com/RiieCco/owasp-bay-area", "commit": "a33452268ef7489ebeb44f65a1bae06eda2072ab", "reason": "PUBLISHED_URL_UNAVAILABLE" },
+    { "id": "realvuln-vulnerable-api", "url": "https://github.com/kolega-ai/realvuln-Vulnerable-API", "commit": "f7797964e1cd63a1cbcc8ced721fa41db674c8e0", "reason": "PUBLISHED_URL_UNAVAILABLE" }
+  ],
+  "notes": [
+    "This is an observed full-manifest baseline, not a CI acceptance gate or a frontier-wide superiority claim.",
+    "Blocked entries are excluded from score denominators and are not treated as safe.",
+    "The deterministic audit produced zero model tokens; model-backed validation was not run in this aggregate.",
+    "Reportable findings require independent validation, so reportable recall is zero in this run by policy.",
+    "The framework breakdown identifies recall and false-positive work for the next optimization cycle."
+  ]
+}
