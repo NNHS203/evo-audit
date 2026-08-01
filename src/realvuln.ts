@@ -3,9 +3,12 @@ import { execFileSync } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { readJson, runAudit, writeJson } from "./core.js";
+import { persistRunArtifacts, readJson, runAudit, writeJson } from "./core.js";
+import { ModelRegistry } from "./models.js";
+import { executePendingWorkerTasks } from "./worker-runner.js";
+import { runProposedValidations } from "./proposed-validation.js";
 import { scannerFindingsFromRun, scoreScannerFindings, groundTruthLabelsFromValue, type ScannerScore } from "./scoring.js";
-import type { AuditRun } from "./types.js";
+import type { AuditModelConfig, AuditRun } from "./types.js";
 
 interface RealVulnRepository {
   repo_url: string;
@@ -48,6 +51,18 @@ export interface RealVulnReport {
   };
   score: ScannerScore;
   notes: string[];
+}
+
+export interface RealVulnRunOptions {
+  output: string;
+  keepCheckout?: boolean;
+  model?: string;
+  modelConfig?: AuditModelConfig;
+  maxModelTasks?: number;
+  concurrency?: number;
+  autoValidate?: boolean;
+  maxValidations?: number;
+  validationImage?: string;
 }
 
 export interface RealVulnAggregateReport {
@@ -179,7 +194,7 @@ async function cloneAtPinnedCommit(repository: RealVulnRepository, target: strin
 export async function runRealVuln(
   benchmarkRoot: string,
   repoId: string,
-  options: { output: string; keepCheckout?: boolean } ,
+  options: RealVulnRunOptions,
 ): Promise<RealVulnReport> {
   const manifestPath = path.join(benchmarkRoot, "benchmark-manifest.json");
   const manifest = await readJson<RealVulnManifest>(manifestPath);
@@ -195,7 +210,30 @@ export async function runRealVuln(
   try {
     await cloneAtPinnedCommit(repository, checkout);
     const audit = await runAudit(checkout, { output: path.join(output, "audit-runs") });
-    const run = audit.run as AuditRun;
+    let run = audit.run as AuditRun;
+    const workerNotes: string[] = [];
+    if (options.model) {
+      if (!options.modelConfig) throw new Error("A model config is required for model-backed RealVuln runs.");
+      const queue = await executePendingWorkerTasks(run, new ModelRegistry(options.modelConfig), {
+        model: options.model,
+        concurrency: options.concurrency ?? 2,
+        maxTasks: options.maxModelTasks ?? 64,
+        cacheDirectory: path.join(audit.artifactDir, "worker-cache"),
+      });
+      run = queue.run;
+      workerNotes.push(`Model-backed worker mode ran ${queue.results.length} bounded HUNT/INVESTIGATE task(s) with ${options.model}.`);
+      await persistRunArtifacts(audit.artifactDir, run);
+    }
+    if (options.autoValidate) {
+      const validation = await runProposedValidations(run, {
+        maxFindings: options.maxValidations ?? 32,
+        artifactDirectory: path.join(audit.artifactDir, "validations"),
+        image: options.validationImage,
+      });
+      run = validation.run;
+      workerNotes.push(`Model-proposed validation attempted=${validation.results.length} skipped=${validation.skipped.length}; blocked validation is not safe.`);
+      await persistRunArtifacts(audit.artifactDir, run);
+    }
     const score = scoreScannerFindings(scannerFindingsFromRun(run), labels, {
       scanner: "evo-audit",
       inputTokens: run.tokenAccounting.inputTokens,
@@ -216,6 +254,8 @@ export async function runRealVuln(
         "The checkout was cloned from the manifest URL and verified at its full commit SHA before auditing.",
         "RealVuln ground truth is external and remains versioned by its own benchmark manifest; this report does not change or vendor those labels.",
         "Candidate and reportable channels are separate. Static candidates are not verified vulnerabilities.",
+        ...workerNotes,
+        ...(options.model ? ["Model-backed candidate findings still require independent T2 validation before they are reportable."] : []),
       ],
     };
     await writeJson(path.join(output, "realvuln-report.json"), report);
@@ -228,7 +268,7 @@ export async function runRealVuln(
 
 export async function runRealVulnAll(
   benchmarkRoot: string,
-  options: { output: string; keepCheckout?: boolean },
+  options: RealVulnRunOptions,
 ): Promise<RealVulnAggregateReport> {
   const manifestPath = path.join(benchmarkRoot, "benchmark-manifest.json");
   const manifest = await readJson<RealVulnManifest>(manifestPath);
@@ -246,7 +286,7 @@ export async function runRealVulnAll(
     const repoOutput = path.join(output, repoId.replace(/[^A-Za-z0-9._-]+/g, "_"));
     try {
       const repository = repositoryFromManifest(manifest, repoId);
-      const report = await runRealVuln(benchmarkRoot, repoId, { output: repoOutput, keepCheckout: options.keepCheckout });
+      const report = await runRealVuln(benchmarkRoot, repoId, { ...options, output: repoOutput });
       scores.push(report.score);
       entries.push({
         id: repoId,

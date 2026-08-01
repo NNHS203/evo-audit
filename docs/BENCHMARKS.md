@@ -49,6 +49,22 @@ To audit the complete manifest and emit one aggregate report, run:
 evo-audit realvuln ./Real-Vuln-Benchmark --all --output ./realvuln-runs
 ```
 
+To measure a configured model on the same pinned holdout, add `--model auto`
+and the model config. The adapter reuses the normal HUNT/INVESTIGATE queue,
+worker cache, token accounting, and evidence gate for every repository:
+
+```bash
+evo-audit realvuln ./Real-Vuln-Benchmark --all \
+  --model auto --config ./audit.models.json \
+  --max-model-tasks 64 --concurrency 2 --output ./realvuln-model-runs
+```
+
+`--auto-validate` is an explicit opt-in for model-proposed positive/negative
+controls and still runs only inside the independent sandbox. It requires an
+operator-selected runtime image, for example
+`--validation-image python:3.12-slim`; a blocked validator remains blocked and
+does not count as a reportable vulnerability.
+
 Each manifest entry is isolated in its own output directory. Clone failures,
 missing upstream repositories, malformed pins, and ground-truth failures are
 recorded as `BLOCKED`; they are excluded from score denominators but never
@@ -126,7 +142,10 @@ node scripts/realvuln-gaps.mjs \
 The next acceptance target is independent positive/negative runtime validation
 for the same findings, followed by broader JavaScript/TypeScript and framework
 holdouts. Candidate recall must not be promoted to reportable recall merely by
-adding a larger model.
+adding a larger model. Model-backed RealVuln runs are intentionally not
+accepted as a clean or frontier-superior result unless their report records
+the model identity, prompt/playbook revision, token totals, validator state,
+and reproducible source pins.
 
 The checked-in records include the full upstream commit, ground-truth hash,
 audited tree digest, line tolerance, scanner commit, and the separate

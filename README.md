@@ -88,6 +88,10 @@ evo-audit realvuln ./Real-Vuln-Benchmark \
 # Audit every manifest entry and keep blocked upstream entries explicit.
 evo-audit realvuln ./Real-Vuln-Benchmark --all --output ./realvuln-runs
 
+# Compare a configured model on the same pinned external holdout.
+evo-audit realvuln ./Real-Vuln-Benchmark --all --model auto \
+  --config ./audit.models.json --max-model-tasks 64
+
 # Inspect the prioritized investigation and validation queue.
 evo-audit plan ./audit-runs/<run>/run.json
 

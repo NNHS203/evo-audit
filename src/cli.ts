@@ -45,6 +45,7 @@ Commands:
   benchmark <cases-dir>               Run benchmark cases (optional --model auto)
   realvuln <benchmark-root> <repo-id>  Clone a pinned RealVuln repo and emit a scored report
   realvuln <benchmark-root> --all       Audit every manifest entry and emit an aggregate
+  realvuln ... --model auto            Add bounded model workers to the external holdout
   evolve <run.json> [--output FILE]   Propose playbook improvements from audit gaps
   report <run.json> [--format FORMAT] Print text, json, or sarif
 
@@ -120,10 +121,22 @@ async function main(): Promise<void> {
   if (command === "realvuln") {
     if (!input || (!secondInput && !flag(args, "--all"))) throw new Error("realvuln requires the RealVuln checkout root and repo-id or --all");
     if (flag(args, "--all") && secondInput && secondInput !== "--all") throw new Error("realvuln --all cannot be combined with a repo-id");
+    const requestedModel = valueFlag(args, "--model", flag(args, "--auto-validate") ? "auto" : "");
+    const modelConfig = requestedModel ? await loadModelConfig(cwd, valueFlag(args, "--config", "")) : undefined;
+    const modelOptions = {
+      model: requestedModel || undefined,
+      modelConfig,
+      maxModelTasks: numberFlag(args, "--max-model-tasks"),
+      concurrency: numberFlag(args, "--concurrency"),
+      autoValidate: flag(args, "--auto-validate"),
+      maxValidations: numberFlag(args, "--max-validations"),
+      validationImage: valueFlag(args, "--validation-image", "") || undefined,
+    };
     if (flag(args, "--all")) {
       const aggregate = await runRealVulnAll(path.resolve(cwd, input), {
         output: path.resolve(cwd, valueFlag(args, "--output", "realvuln-runs")),
         keepCheckout: flag(args, "--keep-checkout"),
+        ...modelOptions,
       });
       if (flag(args, "--json")) console.log(JSON.stringify(aggregate, null, 2));
       else {
@@ -137,6 +150,7 @@ async function main(): Promise<void> {
     const report = await runRealVuln(path.resolve(cwd, input), secondInput, {
       output: path.resolve(cwd, valueFlag(args, "--output", "realvuln-runs")),
       keepCheckout: flag(args, "--keep-checkout"),
+      ...modelOptions,
     });
     if (flag(args, "--json")) console.log(JSON.stringify(report, null, 2));
     else {
