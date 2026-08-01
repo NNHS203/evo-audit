@@ -1074,6 +1074,27 @@ test("Python framework policies distinguish deployment settings, auth cookies, a
     "def authenticate_helper(input_email, input_password):",
     "    return User.find_by_email(input_email)",
   ].join("\n"), "utf8");
+  await writeFile(path.join(root, "graphql_auth.py"), [
+    "import graphene",
+    "class Login(graphene.Mutation):",
+    "    class Arguments:",
+    "        username = graphene.String(required=True)",
+    "        password = graphene.String(required=True)",
+    "    def mutate(self, info, username, password):",
+    "        return User.authenticate(username, password)",
+  ].join("\n"), "utf8");
+  await writeFile(path.join(root, "tornado_auth.py"), [
+    "import tornado.web",
+    "class LoginHandler(tornado.web.RequestHandler):",
+    "    def post(self):",
+    "        username = self.get_argument('username')",
+    "        password = self.get_argument('password')",
+    "        return authenticate(username, password)",
+    "class PublicHandler(tornado.web.RequestHandler):",
+    "    def post(self):",
+    "        title = self.get_argument('title')",
+    "        return title",
+  ].join("\n"), "utf8");
   await writeFile(path.join(root, "uploads.py"), [
     "from flask import request",
     "@app.post('/upload')",
@@ -1178,6 +1199,9 @@ test("Python framework policies distinguish deployment settings, auth cookies, a
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-IDOR-001"), true);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-RATE-LIMIT-001" && finding.locations.some((location) => location.file === "auth.py")), true);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-RATE-LIMIT-001" && finding.locations.some((location) => location.file === "auth.py" && location.line >= 7)), false);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-RATE-LIMIT-001" && finding.locations.some((location) => location.file === "graphql_auth.py")), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-RATE-LIMIT-001" && finding.locations.some((location) => location.file === "tornado_auth.py" && location.line === 3)), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-RATE-LIMIT-001" && finding.locations.some((location) => location.file === "tornado_auth.py" && location.line === 8)), false);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-UNRESTRICTED-FILE-UPLOAD-001" && finding.locations.some((location) => location.file === "uploads.py")), true);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-SENSITIVE-DATA-EXPOSURE-001" && finding.locations.some((location) => location.file === "logging.py")), true);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-USER-ENUMERATION-001" && finding.locations.some((location) => location.file === "enum.py")), true);

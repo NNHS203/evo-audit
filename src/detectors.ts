@@ -590,11 +590,19 @@ function pythonRateLimitLines(relativePath: string, content: string, playbook: A
     const explicitAuthSurface = authName || authRouteName;
     const authContext = explicitAuthSurface || (authOperation && credentialInput);
     const authFlow = authContext && requestInput && (postLike || authName || authRouteName);
+    const graphqlMutationAuthFlow = /\bgraphene\s*\.\s*Mutation\b/i.test(content)
+      && /^mutate$/i.test(block.name)
+      && credentialInput
+      && /\b(?:user|account|authenticate|login|token|password)\b/i.test(block.body);
+    const requestHandlerAuthFlow = /\b(?:tornado\s*\.\s*web\s*\.\s*RequestHandler|BaseHTTPRequestHandler)\b/i.test(content)
+      && /^(?:post|do_POST|do_GET|get)$/i.test(block.name)
+      && credentialInput
+      && (requestInput || /\b(?:params\s*\.\s*get|\/login|cursor\s*\.\s*execute|authenticate|login)\b/i.test(block.body));
     // A decorated endpoint that merely reads an email/token/profile field is
     // not itself an authentication-attempt surface. Require an explicit auth
     // route/name or an authentication operation before suggesting throttling.
     const routeAuthFlow = explicitAuthSurface && credentialInput && (postLike || (requestInput && authName));
-    if (!authFlow && !routeAuthFlow) continue;
+    if (!authFlow && !routeAuthFlow && !graphqlMutationAuthFlow && !requestHandlerAuthFlow) continue;
     if (moduleHasLimiter && /\b(?:limiter|rate_limit|throttle|lockout|backoff|failed_attempt|sleep\s*\()\b/i.test(block.body)) continue;
     if (/\b(?:limiter|rate_limit|throttle|lockout|backoff|failed_attempt|sleep\s*\()\b/i.test(block.body)) continue;
     result.set(block.routeLine, [rule.id]);
