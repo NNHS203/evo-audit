@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "caseId": "framework-express-idor-001",
+  "split": "framework-holdout",
+  "language": "javascript",
+  "files": [
+    {
+      "path": "server/users.js",
+      "code": "app.get('/users/:id', requireAuth, async (req, res) => {\n  const user = await User.findById(req.params.id);\n  return res.json(user);\n});\n"
+    }
+  ],
+  "property": "An authenticated Express-style route selects a user by a caller-controlled identifier without an ownership constraint.",
+  "expected": { "vulnerable": true, "ruleId": "JS-IDOR-001" },
+  "notes": ["Framework holdout: route-aware JavaScript object ownership."]
+}

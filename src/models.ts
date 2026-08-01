@@ -194,6 +194,12 @@ function withinAutoCost(model: ModelDefinition, request: ModelTaskRequest, polic
   return estimate <= policy.maxCostPerRunUsd;
 }
 
+function outputTokenLimit(request: ModelTaskRequest, requested?: number): number {
+  const remaining = Math.floor(request.budgetTokens - request.estimatedInputTokens);
+  if (remaining < 64) throw new Error(`Model task input estimate (${request.estimatedInputTokens}) leaves less than 64 output tokens in its ${request.budgetTokens}-token budget.`);
+  return Math.max(64, Math.min(Math.floor(requested ?? remaining), remaining));
+}
+
 function chooseModel(config: AuditModelConfig, request: ModelTaskRequest): ModelDefinition {
   if (request.model && request.model !== "auto") {
     const exact = config.models.find((candidate) => candidate.id === request.model && candidate.enabled !== false);
@@ -244,7 +250,7 @@ async function completeOpenAI(model: ModelDefinition, credential: string | null,
   const result = await requestJson(`${model.baseUrl}/chat/completions`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ model: model.model, messages: request.messages, temperature: request.temperature ?? 0, max_tokens: request.maxOutputTokens ?? Math.max(256, request.budgetTokens - request.estimatedInputTokens), response_format: { type: "json_object" } }),
+    body: JSON.stringify({ model: model.model, messages: request.messages, temperature: request.temperature ?? 0, max_tokens: outputTokenLimit(request, request.maxOutputTokens), response_format: { type: "json_object" } }),
   }, request.signal);
   const choice = Array.isArray(result.body.choices) ? result.body.choices[0] as Record<string, unknown> | undefined : undefined;
   const message = choice?.message && typeof choice.message === "object" ? choice.message as Record<string, unknown> : {};
@@ -269,7 +275,7 @@ async function completeAnthropic(model: ModelDefinition, credential: string | nu
   const result = await requestJson(`${model.baseUrl}/v1/messages`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ model: model.model, system: system || undefined, messages, max_tokens: request.maxOutputTokens ?? Math.max(256, request.budgetTokens - request.estimatedInputTokens), temperature: request.temperature ?? 0 }),
+    body: JSON.stringify({ model: model.model, system: system || undefined, messages, max_tokens: outputTokenLimit(request, request.maxOutputTokens), temperature: request.temperature ?? 0 }),
   }, request.signal);
   return {
     requestId: String(result.body.id ?? result.headers.get("request-id") ?? randomUUID()),

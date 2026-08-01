@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import type {
   AuditObligation,
   AuditRun,
@@ -46,6 +48,82 @@ function locationInSnapshot(run: AuditRun, location: SourceLocation): boolean {
   if (!Number.isInteger(location.line) || !Number.isInteger(location.endLine) || location.line < 1 || location.endLine < location.line) return false;
   if (file.lineCount !== undefined && location.endLine > file.lineCount) return false;
   return Number.isInteger(location.column) && location.column > 0;
+}
+
+function normalizeSnippet(value: string): string {
+  return value
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim().replace(/[ \t]+/g, " "))
+    .join("\n")
+    .trim();
+}
+
+type SnapshotLineCache = Map<string, string[] | null>;
+
+function snapshotLines(run: AuditRun, filePath: string, cache: SnapshotLineCache): string[] | null {
+  if (cache.has(filePath)) return cache.get(filePath) ?? null;
+  const fingerprint = run.files.find((file) => file.path === filePath);
+  if (!fingerprint) {
+    cache.set(filePath, null);
+    return null;
+  }
+  const root = path.resolve(run.root);
+  const target = path.resolve(root, filePath);
+  if (target !== root && !target.startsWith(`${root}${path.sep}`)) {
+    cache.set(filePath, null);
+    return null;
+  }
+  try {
+    const buffer = readFileSync(target);
+    const digest = createHash("sha256").update(buffer).digest("hex");
+    if (digest !== fingerprint.sha256) {
+      cache.set(filePath, null);
+      return null;
+    }
+    const lines = buffer.toString("utf8").split(/\r?\n/);
+    if (fingerprint.lineCount !== undefined && lines.length !== fingerprint.lineCount) {
+      cache.set(filePath, null);
+      return null;
+    }
+    cache.set(filePath, lines);
+    return lines;
+  } catch {
+    cache.set(filePath, null);
+    return null;
+  }
+}
+
+function validateSourceLocation(
+  run: AuditRun,
+  location: SourceLocation,
+  cache: SnapshotLineCache,
+): { valid: boolean; reason?: string } {
+  if (!locationInSnapshot(run, location)) return { valid: false, reason: "outside the fingerprinted snapshot or beyond its recorded line count" };
+  const lines = snapshotLines(run, location.file, cache);
+  if (!lines) return { valid: false, reason: "the source file was missing or its content no longer matched the snapshot fingerprint" };
+  const actual = normalizeSnippet(lines.slice(location.line - 1, location.endLine).join("\n"));
+  const expected = normalizeSnippet(location.snippet);
+  if (!expected || !actual.includes(expected)) return { valid: false, reason: "the worker snippet did not match the fingerprinted source lines" };
+  return { valid: true };
+}
+
+function sanitizeEvidence(
+  run: AuditRun,
+  items: EvidenceItem[],
+  cache: SnapshotLineCache,
+): { evidence: EvidenceItem[]; dropped: string[] } {
+  const dropped: string[] = [];
+  const evidence = items.flatMap((item) => {
+    if (!item.locations || item.locations.length === 0) return [item];
+    const locations = item.locations.filter((location) => {
+      const validation = validateSourceLocation(run, location, cache);
+      if (!validation.valid) dropped.push(`${item.title}: ${validation.reason ?? "invalid source location"}`);
+      return validation.valid;
+    });
+    return locations.length > 0 ? [{ ...item, locations }] : [];
+  });
+  return { evidence, dropped };
 }
 
 function evidenceKey(item: EvidenceItem): string {
@@ -128,11 +206,11 @@ function gateClaim(
 
 function matchingFinding(findings: Finding[], worker: AuditWorkerResult, candidate: AuditWorkerResult["findings"][number]): Finding | undefined {
   if (candidate.id) {
-    const byId = findings.find((finding) => finding.id === candidate.id);
+    const byId = findings.find((finding) => finding.id === candidate.id && finding.ruleId === candidate.ruleId);
     if (byId) return byId;
   }
   if (candidate.obligationId) {
-    const byObligation = findings.find((finding) => finding.obligationId === candidate.obligationId);
+    const byObligation = findings.find((finding) => finding.obligationId === candidate.obligationId && finding.ruleId === candidate.ruleId);
     if (byObligation) return byObligation;
   }
   const candidateLocations = locationsKey(candidate.locations);
@@ -163,14 +241,29 @@ function createWorkerObligation(run: AuditRun, result: AuditWorkerResult, findin
 
 function mergeFinding(run: AuditRun, result: AuditWorkerResult, candidate: AuditWorkerResult["findings"][number]): Finding {
   const existing = matchingFinding(run.findings, result, candidate);
-  const evidence = uniqueEvidence([...(existing?.evidence ?? []), ...(candidate.evidence ?? [])]);
+  const locationCache: SnapshotLineCache = new Map();
+  const sanitizedEvidence = sanitizeEvidence(run, [...(existing?.evidence ?? []), ...(candidate.evidence ?? [])], locationCache);
+  const evidence = uniqueEvidence(sanitizedEvidence.evidence);
   const proposedLocations = candidate.locations && candidate.locations.length > 0 ? candidate.locations : existing?.locations ?? [];
-  const locations = proposedLocations.filter((location) => locationInSnapshot(run, location));
+  const locationValidation = proposedLocations.map((location) => ({ location, result: validateSourceLocation(run, location, locationCache) }));
+  const locations = locationValidation.filter((item) => item.result.valid).map((item) => item.location);
   const droppedLocations = proposedLocations.length - locations.length;
-  const scopeValid = locations.length > 0 && locations.every((location) => locationInSnapshot(run, location));
-  const workerClaim = workerClaimGate(candidate.status, candidate.evidenceTier, evidence);
+  const locationReasons = uniqueStrings(locationValidation.filter((item) => !item.result.valid).map((item) => item.result.reason ?? "invalid source location"));
+  const scopeValid = proposedLocations.length > 0 && droppedLocations === 0;
+  const knownRule = !run.recon?.ruleInventory?.length || run.recon.ruleInventory.some((rule) => rule.id === candidate.ruleId);
+  const ruleLimitation = knownRule ? undefined : "The worker used a rule ID outside the configured playbook; the claim is quarantined as UNKNOWN until an operator adds and evaluates that rule.";
+  const workerClaim = workerClaimGate(knownRule ? candidate.status : "UNKNOWN", knownRule ? candidate.evidenceTier : "T0_HYPOTHESIS", evidence);
   const claim = gateClaim(workerClaim.status, workerClaim.evidenceTier, evidence, scopeValid);
-  const limitation = [workerClaim.limitation, claim.limitation].filter((item): item is EvidenceItem => Boolean(item));
+  const locationLimitations = [
+    ...(ruleLimitation ? [ruleLimitation] : []),
+    ...(droppedLocations > 0 ? [`${droppedLocations} worker location(s) were rejected: ${locationReasons.join("; ")}.`] : []),
+    ...(sanitizedEvidence.dropped.length > 0 ? [`${sanitizedEvidence.dropped.length} evidence location(s) were rejected because they were not anchored to the fingerprinted snapshot.`] : []),
+  ];
+  const limitation = [
+    workerClaim.limitation,
+    claim.limitation,
+    ...locationLimitations.map((detail): EvidenceItem => ({ type: "LIMITATION", title: detail === ruleLimitation ? "Rule inventory gate" : "Source evidence anchored", detail, reproducible: false })),
+  ].filter((item): item is EvidenceItem => Boolean(item));
   const obligationId = candidate.obligationId ?? existing?.obligationId ?? `${run.runId}-${result.worker}-${stableId([candidate.ruleId, candidate.title, locationsKey(locations)])}`;
 
   if (!existing && !run.obligations.some((obligation) => obligation.id === obligationId)) {
@@ -194,7 +287,7 @@ function mergeFinding(run: AuditRun, result: AuditWorkerResult, candidate: Audit
       ...(existing?.limitations ?? []),
       ...(candidate.limitations ?? []),
       ...(claim.limitation ? [claim.limitation.detail] : []),
-      ...(droppedLocations > 0 ? [`${droppedLocations} worker location(s) were outside the fingerprinted snapshot or beyond its recorded line count.`] : []),
+      ...locationLimitations,
     ]),
     proposedValidation: candidate.proposedValidation ?? existing?.proposedValidation,
     worker: result.worker,
@@ -282,7 +375,18 @@ export function mergeWorkerResult(runInput: AuditRun, result: AuditWorkerResult)
   if (result.receiptId) {
     run.workerReceipts = [
       ...(run.workerReceipts ?? []),
-      { receiptId: result.receiptId, worker: result.worker, taskId: result.taskId, usage: reported ? { inputTokens: nonNegativeNumber(reported.inputTokens, 0), outputTokens: nonNegativeNumber(reported.outputTokens, 0), cachedTokens: nonNegativeNumber(reported.cachedTokens, 0), estimatedCostUsd: nonNegativeNumber(reported.estimatedCostUsd, 0), durationMs: nonNegativeNumber(reported.durationMs, 0), source: "WORKER_REPORTED" } : undefined, appliedAt: new Date().toISOString() },
+      {
+        receiptId: result.receiptId,
+        worker: result.worker,
+        taskId: result.taskId,
+        modelRequestId: result.modelRequestId,
+        providerModel: result.providerModel,
+        promptHash: result.promptHash,
+        finishReason: result.finishReason,
+        cacheHit: result.cacheHit,
+        usage: reported ? { inputTokens: nonNegativeNumber(reported.inputTokens, 0), outputTokens: nonNegativeNumber(reported.outputTokens, 0), cachedTokens: nonNegativeNumber(reported.cachedTokens, 0), estimatedCostUsd: nonNegativeNumber(reported.estimatedCostUsd, 0), durationMs: nonNegativeNumber(reported.durationMs, 0), source: "WORKER_REPORTED" } : undefined,
+        appliedAt: new Date().toISOString(),
+      },
     ];
   }
 

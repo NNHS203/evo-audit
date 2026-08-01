@@ -181,9 +181,9 @@ The runner verifies the checkout HEAD, copies it read-only into an isolated
 temporary case workspace, excludes `.git`, dependencies, build output, and
 audit configuration, then records the resulting source tree digest.
 
-The checked-in `framework-holdout` split adds twelve dependency-free cases for
-FastAPI SQL/NoSQL flows, FastAPI and Flask object ownership, Django object
-ownership, Flask uploads, Express command/redirect flows, and safe controls.
+The checked-in `framework-holdout` split adds fourteen dependency-free cases
+for FastAPI SQL/NoSQL flows, FastAPI and Flask object ownership, Django object
+ownership, Flask uploads, Express command/redirect/object-ownership flows, and safe controls.
 Run it with the pinned manifest:
 
 ```bash
@@ -193,7 +193,7 @@ evo-audit benchmark ./benchmark/cases \
 ```
 
 The current deterministic observation is candidate precision `1.000`, recall
-`1.000`, and FPR `0.000` on these twelve cases; it remains a holdout observation,
+`1.000`, and FPR `0.000` on these fourteen cases; it remains a holdout observation,
 and reportable recall is `0.000` until independent validation runs.
 
 ### Independent validator holdout
@@ -231,8 +231,15 @@ claims independently reproduced by this repository.
    validated-finding rate, unsupported-claim rate, tokens per validated
    finding, and wall-clock latency.
 4. Count incomplete coverage as `UNKNOWN`, never as a true negative.
-5. Report multi-run mean and variance for nondeterministic models, and keep
+5. Require source-snippet anchoring and configured-rule membership before a
+   worker claim can enter the scored finding channel.
+6. Report multi-run mean and variance for nondeterministic models, and keep
    holdout cases out of prompt, detector, or routing changes.
+
+Model-backed artifacts should also retain the provider model, request ID,
+prompt hash, finish reason, cache state, and the input/output/cached token
+totals. A prompt that exceeds its task allocation is a harness failure, not a
+reason to silently spend more tokens.
 
 For cases that declare a validator command, `benchmark --validate` runs the
 positive and negative controls through the same read-only, no-network

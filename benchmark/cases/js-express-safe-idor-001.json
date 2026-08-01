@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "caseId": "framework-express-safe-idor-001",
+  "split": "framework-holdout",
+  "language": "typescript",
+  "files": [
+    {
+      "path": "server/users.ts",
+      "code": "app.get('/users/:id', requireAuth, async (req, res) => {\n  const user = await User.findOne({ _id: req.params.id, ownerId: req.user.id });\n  return res.json(user);\n});\n"
+    }
+  ],
+  "property": "An authenticated Express-style route constrains the selected user to the current principal.",
+  "expected": { "vulnerable": false, "ruleId": "JS-IDOR-001" },
+  "notes": ["Negative control for route-aware JavaScript object ownership."]
+}

@@ -357,6 +357,11 @@ export interface AuditWorkerResult {
   worker: string;
   taskId?: string;
   receiptId?: string;
+  modelRequestId?: string;
+  providerModel?: string;
+  promptHash?: string;
+  finishReason?: string;
+  cacheHit?: boolean;
   error?: string;
   findings: Array<
     Partial<Finding> & {
@@ -374,6 +379,11 @@ export interface WorkerReceipt {
   receiptId: string;
   worker: string;
   taskId?: string;
+  modelRequestId?: string;
+  providerModel?: string;
+  promptHash?: string;
+  finishReason?: string;
+  cacheHit?: boolean;
   usage?: TokenAccounting;
   appliedAt: string;
 }

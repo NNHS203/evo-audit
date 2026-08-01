@@ -148,6 +148,15 @@ Workers should consume one plan task at a time:
 5. Let the independent validator run the positive reproducer and negative
    control against the pinned snapshot.
 
+The prompt builder enforces the task budget before a provider call: graph and
+source slices are compacted deterministically, an output reserve is retained,
+and a provider request is rejected if the input estimate leaves less than the
+minimum output budget. Worker locations and evidence locations must also match
+the fingerprinted source text; stale or hallucinated snippets are removed and
+the claim remains non-reportable. Model receipts persist the provider model,
+request ID, prompt hash, finish reason, and cache state for replay and cost
+auditing.
+
 `STATIC_ONLY`, `PARTIAL_WORKER`, and `VALIDATED` describe semantic coverage;
 `PENDING`, `WAITING`, and `DEFERRED` are workflow states, not security
 verdicts. A deferred task means the worker budget was exhausted; it does not
@@ -195,6 +204,11 @@ proof by itself.
 
 Worker claims are deliberately downgraded to hypotheses/supporting evidence.
 The validator-owned ledger is the only path to `VERIFIED`.
+
+Worker outputs using a rule ID outside the configured playbook are quarantined
+as `UNKNOWN`; adding a new rule requires an explicit playbook and holdout
+evaluation rather than allowing a model to create an unmeasured reporting
+channel.
 
 `review --model auto` is the turnkey version of this loop: it runs pending
 HUNT tasks first, merges them deterministically, then replans and runs

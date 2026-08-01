@@ -15,7 +15,7 @@ import type { AuditRun } from "../src/types.js";
 import { applyValidationResult, assertWorkspaceMatchesSnapshot, validateResultAgainstRun } from "../src/validator.js";
 import { mergeWorkerResult } from "../src/workers.js";
 import { loadModelConfig, ModelRegistry } from "../src/models.js";
-import { executePendingWorkerTasks, workerResultFromCompletion } from "../src/worker-runner.js";
+import { buildWorkerMessages, executePendingWorkerTasks, workerResultFromCompletion } from "../src/worker-runner.js";
 import { runValidationRequest } from "../src/validation-runner.js";
 import { deduplicateRun } from "../src/dedup.js";
 import { buildRevalidationPlan } from "../src/revalidation.js";
@@ -356,6 +356,27 @@ test("worker validation proposals remain inert and bounded", async () => {
   assert.ok(impossibleFinding);
   assert.deepEqual(impossibleFinding.locations, []);
   assert.match(impossibleFinding.limitations.join(" "), /outside the fingerprinted snapshot|line count/i);
+
+  const forgedSnippet = workerResultFromCompletion({
+    requestId: "proposal-4",
+    modelId: "test-model",
+    providerModel: "test",
+    text: JSON.stringify({ findings: [{
+      ruleId: "MODEL-CANDIDATE-004",
+      title: "Forged source anchor",
+      status: "SUPPORTED",
+      evidenceTier: "T1_STATIC_PATH",
+      locations: [{ file: "safe.ts", line: 1, column: 1, endLine: 1, snippet: "export const dangerous = eval(input);" }],
+      evidence: [{ type: "TRACE", title: "Forged trace", detail: "The claimed line is unsafe.", reproducible: false, locations: [{ file: "safe.ts", line: 1, column: 1, endLine: 1, snippet: "export const dangerous = eval(input);" }] }],
+    }] }),
+    usage: { inputTokens: 20, outputTokens: 12, cachedTokens: 0, estimatedCostUsd: 0, source: "WORKER_REPORTED" },
+  }, task);
+  const anchored = mergeWorkerResult(run, forgedSnippet);
+  const anchoredFinding = anchored.findings.find((finding) => finding.ruleId === "MODEL-CANDIDATE-004");
+  assert.ok(anchoredFinding);
+  assert.equal(anchoredFinding.status, "UNKNOWN");
+  assert.deepEqual(anchoredFinding.locations, []);
+  assert.match(anchoredFinding.limitations.join(" "), /snippet did not match|evidence location/i);
 });
 
 test("pending worker queue runs HUNT before a bounded INVESTIGATE pass", async () => {
@@ -380,13 +401,33 @@ test("pending worker queue runs HUNT before a bounded INVESTIGATE pass", async (
     assert.equal(queued.results.length, 2);
     assert.equal(queued.results.every((item) => !item.error), true);
     assert.equal(queued.run.tokenAccounting.inputTokens, 40);
+    assert.equal(queued.run.workerReceipts?.length, 2);
+    assert.equal(queued.run.workerReceipts?.every((receipt) => receipt.providerModel === "test" && /^[a-f0-9]{64}$/.test(receipt.promptHash ?? "")), true);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
 
+test("worker context compaction keeps input plus output inside the task budget", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-worker-budget-"));
+  await initWorkspace(root);
+  await writeFile(path.join(root, "app.ts"), `${Array.from({ length: 240 }, (_, index) => `export const value${index} = ${index};`).join("\n")}\n`, "utf8");
+  const { run } = await runAudit(root, { output: path.join(root, "runs") });
+  const task = run.plan?.tasks.find((candidate) => candidate.phase === "HUNT" && candidate.status === "PENDING");
+  assert.ok(task);
+  const boundedTask = { ...task, budgetTokens: 650 };
+  const prompt = await buildWorkerMessages(run, boundedTask);
+  assert.equal(prompt.estimatedInputTokens <= boundedTask.budgetTokens - 128, true);
+  assert.match(prompt.messages[0]?.content ?? "", /untrusted data/i);
+  assert.match(prompt.messages[1]?.content ?? "", /Source context:|context compacted/i);
+});
+
 test("OpenAI-compatible provider normalizes completion text and token usage", async () => {
-  const server = createServer((_request, response) => {
+  let requestBody: Record<string, unknown> | undefined;
+  const server = createServer(async (request, response) => {
+    let body = "";
+    for await (const chunk of request) body += chunk.toString();
+    requestBody = JSON.parse(body) as Record<string, unknown>;
     response.setHeader("content-type", "application/json");
     response.end(JSON.stringify({ id: "provider-test-1", choices: [{ message: { content: "{\"findings\":[]}" }, finish_reason: "stop" }], usage: { prompt_tokens: 40, completion_tokens: 12, prompt_tokens_details: { cached_tokens: 8 } } }));
   });
@@ -399,12 +440,13 @@ test("OpenAI-compatible provider normalizes completion text and token usage", as
       auto: { enabled: true, preferred: ["local"], minimumQualityTier: 1 },
       models: [{ id: "local", transport: "OPENAI_COMPATIBLE", model: "test", baseUrl: `http://127.0.0.1:${address.port}`, auth: { method: "NONE" }, qualityTier: 3, capabilities: ["HUNT", "JSON"] }],
     });
-    const response = await registry.complete({ phase: "HUNT", priority: 80, estimatedInputTokens: 20, budgetTokens: 400, messages: [{ role: "user", content: "test" }] });
+    const response = await registry.complete({ phase: "HUNT", priority: 80, estimatedInputTokens: 20, budgetTokens: 400, maxOutputTokens: 500, messages: [{ role: "user", content: "test" }] });
     assert.equal(response.text, "{\"findings\":[]}");
     assert.equal(response.requestId, "provider-test-1");
     assert.deepEqual({ ...response.usage, durationMs: undefined }, { inputTokens: 40, outputTokens: 12, cachedTokens: 8, estimatedCostUsd: 0, durationMs: undefined, source: "WORKER_REPORTED" });
     assert.equal(typeof response.usage.durationMs, "number");
     assert.equal(response.usage.durationMs! >= 0, true);
+    assert.equal(requestBody?.max_tokens, 380);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
@@ -576,7 +618,8 @@ test("worker ingestion requires reproducible evidence before VERIFIED", async ()
       },
     ],
   });
-  assert.equal(hallucinated.findings.at(-1)?.status, "SUSPECTED");
+  assert.equal(hallucinated.findings.at(-1)?.status, "UNKNOWN");
+  assert.match(hallucinated.findings.at(-1)?.limitations.join(" ") ?? "", /outside the configured playbook/i);
 });
 
 test("baseline runs expose a semantic file delta without narrowing coverage", async () => {
@@ -912,6 +955,26 @@ test("generated vendor assets are skipped without hiding ordinary static applica
   const result = await runAudit(root, { output: path.join(root, "runs") });
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "JS-COMMAND-INJECTION-001" && finding.locations.some((location) => location.file.includes("jquery.min.js"))), false);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "JS-COMMAND-INJECTION-001" && finding.locations.some((location) => location.file === "static/app.js")), true);
+});
+
+test("JavaScript route ownership tracing distinguishes unsafe and constrained object lookups", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-js-idor-"));
+  await initWorkspace(root);
+  await writeFile(path.join(root, "unsafe.js"), [
+    "app.get('/users/:id', requireAuth, async (req, res) => {",
+    "  const user = await User.findById(req.params.id);",
+    "  return res.json(user);",
+    "});",
+  ].join("\n"), "utf8");
+  await writeFile(path.join(root, "safe.js"), [
+    "app.get('/users/:id', requireAuth, async (req, res) => {",
+    "  const user = await User.findOne({ _id: req.params.id, ownerId: req.user.id });",
+    "  return res.json(user);",
+    "});",
+  ].join("\n"), "utf8");
+  const result = await runAudit(root, { output: path.join(root, "runs") });
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "JS-IDOR-001" && finding.locations.some((location) => location.file === "unsafe.js")), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "JS-IDOR-001" && finding.locations.some((location) => location.file === "safe.js")), false);
 });
 
 test("Python graph keeps bound SQL parameters and browser clients out of server-side injection findings", async () => {

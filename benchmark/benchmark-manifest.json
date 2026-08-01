@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "benchmarkVersion": "evo-audit-0.1.0",
+  "benchmarkVersion": "evo-audit-0.1.1",
   "cases": [
     {
       "file": "cases/js-command-injection.json",
@@ -175,6 +175,18 @@
       "caseId": "framework-express-safe-redirect-001",
       "split": "framework-holdout",
       "sha256": "77b88a99a14e48db6f7f43bba88addc518523ce0fb900af0574a0a90eb754af1"
+    },
+    {
+      "file": "cases/js-express-idor-001.json",
+      "caseId": "framework-express-idor-001",
+      "split": "framework-holdout",
+      "sha256": "3c80bc411d00481c1d01ed6111ccf5d875358cc8ce14389e294844cde942f30c"
+    },
+    {
+      "file": "cases/js-express-safe-idor-001.json",
+      "caseId": "framework-express-safe-idor-001",
+      "split": "framework-holdout",
+      "sha256": "6b09ac8b8f2d7bfd1e79b2162e8412e2a522877f2d6034fce7e936d9e90efcf6"
     }
   ],
   "notes": [

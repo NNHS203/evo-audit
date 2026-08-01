@@ -60,6 +60,16 @@ const defaultRules: PlaybookRule[] = [
     enabled: true,
   },
   {
+    id: "JS-IDOR-001",
+    title: "Authenticated route selects an object without an ownership constraint",
+    description:
+      "An Express-style route uses a caller-controlled object identifier and an authenticated lookup without an observed owner or subject constraint. Middleware and cross-file policy require independent validation.",
+    severity: "HIGH",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx", "**/*.mjs", "**/*.cjs"],
+    enabled: true,
+  },
+  {
     id: "PY-DYNAMIC-CODE-001",
     title: "Dynamic code execution from a Python call site",
     description:
@@ -354,7 +364,7 @@ const defaultRules: PlaybookRule[] = [
 export const defaultPlaybook: AuditPlaybook = {
   schemaVersion: 1,
   id: "evo-audit-default",
-  version: "0.1.0",
+  version: "0.1.1",
   evidencePolicy: {
     reportableTiers: ["T2_REPRODUCIBLE"],
     neverTreatNoMatchAsSafe: true,

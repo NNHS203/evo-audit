@@ -96,10 +96,14 @@ runner is expected to report zero reportable recall until an independent
 validator result is applied; that zero is a useful guard against accidentally
 scoring static candidates as closed vulnerabilities.
 
-Model-backed mode reuses the same task protocol, local prompt cache, receipt
-deduplication, and global token budget as a normal review. It still does not
-turn worker output into a reportable vulnerability: a separate validator run
-is required for `T2_REPRODUCIBLE` evidence.
+Model-backed mode reuses the same task protocol, deterministic prompt
+compaction, local prompt cache, receipt deduplication, and global token budget
+as a normal review. The prompt builder reserves output tokens and rejects an
+input estimate that cannot fit the task allocation. Receipts record provider
+model/request provenance and a prompt hash. Worker source/evidence locations
+must match the pinned file content, and unknown rule IDs are quarantined as
+`UNKNOWN`. None of this turns worker output into a reportable vulnerability: a
+separate validator run is required for `T2_REPRODUCIBLE` evidence.
 
 Cases may declare a `validation` block with a `findingRuleId`, positive
 `reproducerCommand`, negative control, timeout, and container image. With

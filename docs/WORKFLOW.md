@@ -56,7 +56,10 @@ The plan converts the playbook into executable work:
 Each investigation task receives a bounded context slice and a token
 allocation. The worker must return its `taskId` and token accounting. Results
 that exceed the allocation are recorded as `BLOCKED`; they do not silently
-expand the budget.
+expand the budget. Before the provider request, the prompt builder reserves
+output tokens and deterministically compacts the graph/source slice so the
+estimated input plus output stays inside the task allocation. A provider call
+is rejected when the input estimate leaves no safe output reserve.
 
 Recon also emits an area-by-attack-class coverage matrix. Empty cells create
 small HUNT tasks; a completed no-match task becomes `UNKNOWN` and can receive a
@@ -76,6 +79,13 @@ runtime or widen the sandbox.
 If workers were run separately, `validate-proposed <run.json>` replays the
 saved proposals without making another model call. This is the token-efficient
 continuation of the same evidence gate, not a second authority.
+
+Model locations are checked against both the file fingerprint and the actual
+snippet in the pinned source. Evidence locations go through the same check;
+stale, out-of-scope, or hallucinated snippets are dropped and recorded as a
+limitation. Receipts retain the provider model, request ID, prompt hash, finish
+reason, cache state, and usage so a result can be replayed and its token cost
+audited.
 
 ### 4. Evidence state
 
@@ -149,6 +159,11 @@ decision artifact. New findings require validation, previously verified
 findings that disappear remain `UNKNOWN` until the after run proves validated
 semantic coverage, and a still-verified finding is marked as a blocking
 regression.
+
+The worker protocol also quarantines rule IDs that are not present in the
+versioned playbook as `UNKNOWN`. This keeps model creativity from silently
+creating an unbenchmarked reporting class; a new rule must be added to the
+playbook and evaluated on held-out cases first.
 
 ## Current implementation boundary
 

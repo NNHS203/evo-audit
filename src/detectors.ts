@@ -583,6 +583,79 @@ function pythonPolicyBlocks(content: string): PythonPolicyBlock[] {
   return blocks;
 }
 
+interface JavaScriptRouteBlock {
+  header: string;
+  body: string;
+  rawBody: string;
+  bodyStart: number;
+}
+
+function matchingDelimiter(masked: string, start: number, open: string, close: string): number | null {
+  let depth = 0;
+  for (let index = start; index < masked.length; index += 1) {
+    if (masked[index] === open) depth += 1;
+    else if (masked[index] === close) {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+  return null;
+}
+
+function javascriptRouteBlocks(content: string): JavaScriptRouteBlock[] {
+  const masked = maskNonCode(content);
+  const routes: JavaScriptRouteBlock[] = [];
+  const routePattern = /\b(?:app|router|apiRouter|api|server)\s*\.\s*(?:get|post|put|patch|delete|options|head)\s*\(/gi;
+  for (const match of masked.matchAll(routePattern)) {
+    const routeStart = match.index ?? 0;
+    const openParen = masked.indexOf("(", routeStart);
+    if (openParen < 0) continue;
+    const closeParen = matchingDelimiter(masked, openParen, "(", ")");
+    if (closeParen === null) continue;
+    const brace = masked.indexOf("{", openParen + 1);
+    if (brace < 0 || brace > closeParen) continue;
+    const closeBrace = matchingDelimiter(masked, brace, "{", "}");
+    if (closeBrace === null) continue;
+    routes.push({
+      header: content.slice(routeStart, brace + 1),
+      body: masked.slice(brace + 1, closeBrace),
+      rawBody: content.slice(brace + 1, closeBrace),
+      bodyStart: brace + 1,
+    });
+  }
+  return routes;
+}
+
+function javascriptLineForOffset(content: string, offset: number): number {
+  return content.slice(0, offset).split(/\r?\n/).length;
+}
+
+function javascriptIdorLines(content: string, playbook: AuditPlaybook): Map<number, string[]> {
+  const result = new Map<number, string[]>();
+  const rule = playbook.rules.find((candidate) => candidate.id === "JS-IDOR-001" && candidate.enabled);
+  if (!rule) return result;
+  const sensitive = /\b(?:user|account|owner|tenant|customer|member|profile|order|invoice|payment|payout|document|message|transaction|ticket|property|secret|credential|token|organization)s?\b/i;
+  const objectLookup = /\.(?:findById|findOne|findUnique|findFirst|find|where|select|getById)\s*\(/i;
+  const callerIdentifier = /\b(?:req|request|ctx|context)\s*\.\s*(?:params|query|body)\s*(?:\.[A-Za-z_]\w*|\[[^\]]+\])/i;
+  const authenticated = /\b(?:require_?auth|authenticate|authMiddleware|isAuthenticated|passport\s*\.\s*authenticate|verifyToken|jwt|session|req\s*\.\s*user|request\s*\.\s*user)\b/i;
+  const authorizationPatterns = [
+    /\b(?:owner|ownerId|author|authorId|createdBy|created_by|accountId|account_id|tenantId|tenant_id|userId|user_id|organizationId|organization_id)\s*[:=]\s*[^,;}\n]*(?:req|request)\s*\.\s*user\b/i,
+    /\b(?:req|request)\s*\.\s*user\s*\.?\s*(?:id|userId|accountId)\b[^\n]{0,160}\b(?:owner|author|createdBy|created_by|accountId|account_id|tenantId|tenant_id|userId|user_id)\b/i,
+    /\b(?:canAccess|canRead|canEdit|canUpdate|authorize|assertOwner|checkOwnership|isOwner|forbidden|notFound)\s*\(/i,
+    /\b(?:status\s*\(\s*403|statusCode\s*=\s*403|throw\s+new\s+(?:Forbidden|Unauthorized)|res\s*\.\s*sendStatus\s*\(\s*403)\b/i,
+  ];
+
+  for (const block of javascriptRouteBlocks(content)) {
+    const pathIdentifier = /["'`](?:[^"'`]*\/)?:(?:id|pk|[A-Za-z_]\w*(?:Id|ID|_id|_ID))[A-Za-z0-9_-]*/i.test(block.header);
+    if (!pathIdentifier || !callerIdentifier.test(block.body) || !authenticated.test(`${block.header}\n${block.rawBody}`)) continue;
+    if (!sensitive.test(`${block.header}\n${block.rawBody}`) || !objectLookup.test(block.body)) continue;
+    if (authorizationPatterns.some((pattern) => pattern.test(block.rawBody))) continue;
+    const lookup = block.body.search(objectLookup);
+    result.set(javascriptLineForOffset(content, block.bodyStart + Math.max(0, lookup)), [rule.id]);
+  }
+  return result;
+}
+
 function pythonRateLimitLines(relativePath: string, content: string, playbook: AuditPlaybook): Map<number, string[]> {
   const result = new Map<number, string[]>();
   const rule = playbook.rules.find((candidate) => candidate.id === "PY-RATE-LIMIT-001" && candidate.enabled);
@@ -1111,6 +1184,13 @@ function policyMatch(ruleId: string): Omit<DetectorMatch, "rule" | "line" | "col
     kind: "AUTHORIZATION_BOUNDARY",
     limitation: "The static pass promotes identifier lookups inside explicit vulnerable branches and Graphene mutations; complete ownership and authorization still require independent validation.",
   };
+  if (ruleId === "JS-IDOR-001") return {
+    rootCause: "An Express-style route uses a caller-controlled object identifier without an observed owner or subject constraint.",
+    impact: "An authenticated user may read or modify another user's object by changing a route or request identifier.",
+    remediation: "Bind the object lookup to the authenticated principal or call a centralized authorization policy, then add a regression test for a foreign identifier.",
+    kind: "AUTHORIZATION_BOUNDARY",
+    limitation: "The static pass recognizes an authenticated route, a sensitive-object lookup, and a caller-controlled identifier; middleware and cross-file authorization still require independent validation.",
+  };
   if (ruleId === "PY-MASS-ASSIGNMENT-001") return {
     rootCause: "Request-derived fields appear to be expanded into a model update without an observed privileged-field allowlist.",
     impact: "An attacker may modify authorization-relevant, ownership, password, or workflow fields that the endpoint did not intend to expose.",
@@ -1226,6 +1306,8 @@ export function detectFindings(
     for (const [lineNumber, ruleIds] of pythonWeakRandomnessLines(relativePath, content, playbook)) pythonPolicyMatches.set(lineNumber, [...new Set([...(pythonPolicyMatches.get(lineNumber) ?? []), ...ruleIds])]);
     for (const [lineNumber, ruleIds] of pythonSecurityConfigurationLines(relativePath, content, playbook)) pythonPolicyMatches.set(lineNumber, [...new Set([...(pythonPolicyMatches.get(lineNumber) ?? []), ...ruleIds])]);
     for (const [lineNumber, ruleIds] of pythonSensitiveLogLines(relativePath, content, playbook)) pythonPolicyMatches.set(lineNumber, [...new Set([...(pythonPolicyMatches.get(lineNumber) ?? []), ...ruleIds])]);
+  } else {
+    for (const [lineNumber, ruleIds] of javascriptIdorLines(content, playbook)) pythonPolicyMatches.set(lineNumber, [...new Set([...(pythonPolicyMatches.get(lineNumber) ?? []), ...ruleIds])]);
   }
 
   for (const [index, line] of lines.entries()) {
