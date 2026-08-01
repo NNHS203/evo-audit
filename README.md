@@ -65,6 +65,10 @@ evo-audit validate ./audit-runs/<run>/run.json ./validation-result.json
 # Or execute the request in a Docker/Podman sandbox (never on the host).
 evo-audit validate-run ./audit-runs/<run>/run.json ./validation-request.json
 
+# Execute already-saved model proposals without spending model tokens again.
+evo-audit validate-proposed ./audit-runs/<run>/run.json \
+  --validation-image node:22-alpine --max-validations 16
+
 # Track root causes across scans, without treating incomplete coverage as clean.
 evo-audit compare ./before/run.json ./after/run.json
 

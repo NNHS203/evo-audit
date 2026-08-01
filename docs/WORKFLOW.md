@@ -73,6 +73,10 @@ validator; a model response alone never becomes proof. The operator chooses
 the container image (`--validation-image`); model output cannot choose the
 runtime or widen the sandbox.
 
+If workers were run separately, `validate-proposed <run.json>` replays the
+saved proposals without making another model call. This is the token-efficient
+continuation of the same evidence gate, not a second authority.
+
 ### 4. Evidence state
 
 The state machine is intentionally conservative:

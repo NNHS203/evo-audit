@@ -31,6 +31,7 @@ Commands:
   verify <run.json> <finding-id>      Create a validator request for one finding
   validate <run.json> <result.json>   Apply an independent validator result
   validate-run <run.json> <request.json> Execute a request in a container sandbox
+  validate-proposed <run.json>        Execute saved model proposals in the sandbox
   compare <before.json> <after.json> Compare findings by root cause across runs
   revalidate <before.json> <after.json> Build a fix/regression validation plan
   score <ground-truth.json> <run/sarif/bandit> Score normalized scanner output
@@ -329,6 +330,24 @@ async function main(): Promise<void> {
     const session = await persistRunArtifacts(path.dirname(runPath), applied.run);
     console.log(`${applied.gate.status}: ${applied.gate.reason}`);
     console.log(summarizeRun(applied.run, { session }));
+    return;
+  }
+
+  if (command === "validate-proposed") {
+    if (!input) throw new Error("validate-proposed requires a run.json");
+    const runPath = path.resolve(cwd, input);
+    const run = await readJson<AuditRun>(runPath);
+    const validation = await runProposedValidations(run, {
+      validator: valueFlag(args, "--validator", "evo-audit-independent-container-validator"),
+      maxFindings: numberFlag(args, "--max-validations") ?? 32,
+      artifactDirectory: path.join(path.dirname(runPath), "validations"),
+      image: valueFlag(args, "--validation-image", "") || undefined,
+    });
+    const session = await persistRunArtifacts(path.dirname(runPath), validation.run);
+    console.log(`Proposed validations: ${validation.results.length} attempted  ${validation.skipped.length} skipped`);
+    for (const skipped of validation.skipped) console.log(`  - ${skipped.findingId}: ${skipped.reason}`);
+    console.log(summarizeRun(validation.run, { session }));
+    console.log(`Updated: ${runPath}`);
     return;
   }
 
