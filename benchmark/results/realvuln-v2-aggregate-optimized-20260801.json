@@ -6,7 +6,7 @@
   "groundTruthVersion": "2.0.0",
   "benchmarkRepositoryRevision": "98872da5caa25eb4d4bc7d5b93e10e08148a2049",
   "scanner": "evo-audit",
-  "scannerCommit": "ccc869624e40db9e9890d50c50622503ffc5b402",
+  "scannerCommit": "0d42baec26ad22d855efa8e0b16cbfbea93283e6",
   "execution": {
     "manifestRepositories": 66,
     "completedRepositories": 62,
@@ -21,20 +21,20 @@
     "labels": 2018,
     "vulnerableLabels": 1762,
     "safeLabels": 256,
-    "findings": 734,
+    "findings": 821,
     "unsupportedClaimCount": 0,
     "unsupportedClaimRate": 0,
     "candidate": {
-      "truePositive": 591,
-      "falsePositive": 143,
-      "falseNegative": 1171,
+      "truePositive": 674,
+      "falsePositive": 147,
+      "falseNegative": 1088,
       "trueNegative": 248,
-      "candidateCount": 734,
+      "candidateCount": 821,
       "validatedCount": 0,
-      "precision": 0.8051771117166212,
-      "recall": 0.3354143019296254,
-      "falsePositiveRate": 0.3657289002557545,
-      "f3": 0.35619575699132106,
+      "precision": 0.8209500609013398,
+      "recall": 0.38251986379114644,
+      "falsePositiveRate": 0.3721518987341772,
+      "f3": 0.4041009652856886,
       "tokensPerValidatedFinding": null
     },
     "reportable": {
@@ -52,19 +52,19 @@
     }
   },
   "frameworkSummary": {
-    "flask": { "repositories": 12, "labels": 341, "findings": 150, "precision": 0.74, "recall": 0.3801369863013699, "falsePositiveRate": 0.45348837209302323, "f3": 0.39956803455723544 },
-    "django": { "repositories": 22, "labels": 761, "findings": 357, "precision": 0.8151260504201681, "recall": 0.4336810730253353, "falsePositiveRate": 0.43137254901960786, "f3": 0.4549718574108818 },
+    "flask": { "repositories": 12, "labels": 341, "findings": 149, "precision": 0.7449664429530202, "recall": 0.3801369863013699, "falsePositiveRate": 0.4470588235294118, "f3": 0.3997119193374145 },
+    "django": { "repositories": 22, "labels": 761, "findings": 372, "precision": 0.8306451612903226, "recall": 0.46050670640834573, "falsePositiveRate": 0.42, "f3": 0.48198408984557783 },
     "python": { "repositories": 3, "labels": 165, "findings": 19, "precision": 0.7894736842105263, "recall": 0.1079136690647482, "falsePositiveRate": 0.13333333333333333, "f3": 0.11811023622047244 },
-    "aiohttp": { "repositories": 1, "labels": 27, "findings": 4, "precision": 1, "recall": 0.17391304347826086, "falsePositiveRate": 0, "f3": 0.1895734597156398 },
-    "fastapi": { "repositories": 23, "labels": 707, "findings": 193, "precision": 0.8238341968911918, "recall": 0.2552166934189406, "falsePositiveRate": 0.2956521739130435, "f3": 0.27413793103448275 },
+    "aiohttp": { "repositories": 1, "labels": 27, "findings": 3, "precision": 1, "recall": 0.13043478260869565, "falsePositiveRate": 0, "f3": 0.14285714285714288 },
+    "fastapi": { "repositories": 23, "labels": 707, "findings": 267, "precision": 0.8426966292134831, "recall": 0.3611556982343499, "falsePositiveRate": 0.34146341463414637, "f3": 0.38304392236976503 },
     "tornado": { "repositories": 1, "labels": 17, "findings": 11, "precision": 1, "recall": 0.7857142857142857, "falsePositiveRate": 0, "f3": 0.802919708029197 }
   },
   "comparisonToCheckedInBaseline": {
     "baseline": "benchmark/results/realvuln-v2-aggregate-20260801.json",
-    "candidatePrecision": { "baseline": 0.4637462235649547, "optimized": 0.8051771117166212, "delta": 0.3414308881516665 },
-    "candidateRecall": { "baseline": 0.17423382519863792, "optimized": 0.3354143019296254, "delta": 0.16118047673098748 },
-    "falsePositiveRate": { "baseline": 0.5916666666666667, "optimized": 0.3657289002557545, "delta": -0.22593776641091218 },
-    "f3": { "baseline": 0.1858353510895884, "optimized": 0.35619575699132106, "delta": 0.17036040590173265 }
+    "candidatePrecision": { "baseline": 0.4637462235649547, "optimized": 0.8209500609013398, "delta": 0.3572038373363851 },
+    "candidateRecall": { "baseline": 0.17423382519863792, "optimized": 0.38251986379114644, "delta": 0.20828603859250852 },
+    "falsePositiveRate": { "baseline": 0.5916666666666667, "optimized": 0.3721518987341772, "delta": -0.21951476793248947 },
+    "f3": { "baseline": 0.1858353510895884, "optimized": 0.4041009652856886, "delta": 0.21826561419610022 }
   },
   "blockedRepositories": [
     { "id": "realvuln-owasp-web-playground", "url": "https://github.com/yourrepo/OWASP-Web-Playground", "commit": "5e682aca1b58e03362a5fbd9fc88c37626e429ce", "reason": "PUBLISHED_URL_UNAVAILABLE" },
@@ -77,6 +77,6 @@
     "Blocked entries are excluded from score denominators and are not treated as safe.",
     "The deterministic audit produced zero model tokens; model-backed investigation was not run in this aggregate.",
     "Reportable findings require independent validation, so reportable recall is zero in this run by policy.",
-    "The optimized commit adds Python property/taint semantics, framework-aware policy evidence for Graphene and request handlers, GraphQL mutation ownership tracing, request-mapping mass-assignment tracing, template unsafe-output evidence, session-integrity separation, generated-asset filtering, parameterized-query recognition, and deterministic gap analysis."
+    "The optimized commit adds Python property/taint semantics, framework-aware policy evidence for Graphene and request handlers, GraphQL mutation ownership tracing, request-mapping mass-assignment tracing, framework-aware authentication throttling boundaries, template unsafe-output evidence, session-integrity separation, generated-asset filtering, parameterized-query recognition, and deterministic gap analysis."
   ]
 }
