@@ -34,6 +34,29 @@ silently mixed into the JS/TS score. The [upstream repository](https://github.co
 must be used with its own manifest and scorer. Scores from different benchmark
 versions are not interchangeable.
 
+For a local pinned checkout, a case can use a source reference instead of
+embedding code:
+
+```json
+{
+  "schemaVersion": 1,
+  "caseId": "project-001",
+  "split": "holdout",
+  "language": "typescript",
+  "source": {
+    "kind": "CHECKOUT",
+    "path": "../pinned-project",
+    "repository": "https://github.com/example/project",
+    "commit": "<full commit SHA>"
+  },
+  "expected": { "vulnerable": true, "ruleId": "RULE-ID" }
+}
+```
+
+The runner verifies the checkout HEAD, copies it read-only into an isolated
+temporary case workspace, excludes `.git`, dependencies, build output, and
+audit configuration, then records the resulting source tree digest.
+
 [RepoAudit](https://arxiv.org/abs/2501.18160) is an important research baseline:
 it combines repository exploration, data-flow facts, path-condition checks, and
 a validator. Its published numbers are paper-reported reference points, not
@@ -55,3 +78,26 @@ claims independently reproduced by this repository.
 This protocol is the basis for a future cross-language adapter; it prevents a
 larger model, looser evidence policy, or unfinished scan from looking like a
 performance win.
+
+The local scorer is available without external services:
+
+```bash
+evo-audit score ./ground-truth.json ./audit-runs/<run>/run.json --format run
+evo-audit score ./ground-truth.json ./semgrep.sarif --format sarif
+evo-audit score ./realvuln-ground-truth.json ./scanner.sarif \
+  --format sarif --ground-truth-format realvuln
+# Checked-in smoke example:
+evo-audit score ./benchmark/ground-truth.example.json \
+  ./benchmark/scanner.example.sarif --format sarif
+```
+
+SARIF results are normalized by rule ID, file, and line range. Ground-truth
+labels are one-to-one; unmatched scanner findings are false positives, while
+unmatched vulnerable labels are false negatives. This is intentionally close
+to the matching discipline used by public scanner benchmarks, while keeping
+Evo Audit's reportable channel tied to independent evidence.
+
+The `realvuln` ground-truth adapter understands per-repository labels with
+`is_vulnerable`, `file`, `location.start_line/end_line`, `primary_cwe`, and
+`acceptable_cwes` fields. It does not download or execute the external
+benchmark; the user must pin and verify that checkout separately.

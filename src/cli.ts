@@ -12,6 +12,7 @@ import { authorizeModel, loadModelConfig, ModelRegistry } from "./models.js";
 import { executeWorkerTask } from "./worker-runner.js";
 import { evaluateBenchmark, runBenchmark } from "./benchmark.js";
 import { buildRevalidationPlan } from "./revalidation.js";
+import { groundTruthLabelsFromValue, scannerFindingsFromRun, scannerFindingsFromSarif, scoreScannerFindings, type GroundTruthFormat } from "./scoring.js";
 import type { AuditRun, AuditWorkerResult, ValidationResult } from "./types.js";
 
 function usage(): string {
@@ -30,6 +31,7 @@ Commands:
   validate-run <run.json> <request.json> Execute a request in a container sandbox
   compare <before.json> <after.json> Compare findings by root cause across runs
   revalidate <before.json> <after.json> Build a fix/regression validation plan
+  score <ground-truth.json> <run-or-sarif> Score normalized scanner output
   plan <run.json> [--json]            Show prioritized investigation/validation tasks
   status <run.json>                   Show coverage and pending obligations
   resume <run.json> [--output FILE]   Write a resumable pending-work plan
@@ -105,6 +107,35 @@ async function main(): Promise<void> {
       }
     }
     if (!acceptance.accepted) throw new Error(`Benchmark acceptance failed: ${acceptance.failures.join("; ")}`);
+    return;
+  }
+
+  if (command === "score") {
+    if (!input || !secondInput) throw new Error("score requires a ground-truth.json and a run.json or SARIF file");
+    const groundTruthFormat = valueFlag(args, "--ground-truth-format", "evo").toUpperCase();
+    if (groundTruthFormat !== "EVO" && groundTruthFormat !== "REALVULN") throw new Error("--ground-truth-format must be evo or realvuln.");
+    const labels = groundTruthLabelsFromValue(await readJson<unknown>(path.resolve(cwd, input)), groundTruthFormat as GroundTruthFormat);
+    const source = await readJson<unknown>(path.resolve(cwd, secondInput));
+    const requestedFormat = valueFlag(args, "--format", "auto");
+    const sourceRecord = source && typeof source === "object" ? source as Record<string, unknown> : {};
+    const isRun = requestedFormat === "run" || (requestedFormat === "auto" && typeof sourceRecord.runId === "string" && Array.isArray(sourceRecord.findings));
+    const scanner = valueFlag(args, "--scanner", isRun ? "evo-audit" : "sarif-scanner");
+    const findings = isRun ? scannerFindingsFromRun(source as AuditRun, scanner) : scannerFindingsFromSarif(source, scanner);
+    const run = isRun ? source as AuditRun : undefined;
+    const score = scoreScannerFindings(findings, labels, {
+      scanner,
+      lineTolerance: numberFlag(args, "--line-tolerance"),
+      inputTokens: numberFlag(args, "--input-tokens") ?? run?.tokenAccounting.inputTokens,
+      outputTokens: numberFlag(args, "--output-tokens") ?? run?.tokenAccounting.outputTokens,
+      durationMs: numberFlag(args, "--duration-ms") ?? run?.tokenAccounting.durationMs,
+    });
+    if (flag(args, "--json")) console.log(JSON.stringify(score, null, 2));
+    else {
+      console.log(`Score ${score.scanner}: labels=${score.labels} findings=${score.findings}`);
+      console.log(`Candidate: precision=${score.candidate.precision.toFixed(3)} recall=${score.candidate.recall.toFixed(3)} false-positive-rate=${score.candidate.falsePositiveRate.toFixed(3)} F3=${score.candidate.f3.toFixed(3)}`);
+      console.log(`Reportable: precision=${score.reportable.precision.toFixed(3)} recall=${score.reportable.recall.toFixed(3)} false-positive-rate=${score.reportable.falsePositiveRate.toFixed(3)} F3=${score.reportable.f3.toFixed(3)} tokens/validated=${score.reportable.tokensPerValidatedFinding ?? "n/a"}`);
+      console.log(`Unsupported claims: ${score.unsupportedClaimCount} (${score.unsupportedClaimRate.toFixed(3)})  latency=${score.durationMs}ms`);
+    }
     return;
   }
 

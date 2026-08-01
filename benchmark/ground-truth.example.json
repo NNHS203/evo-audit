@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "labels": [
+    {
+      "id": "example-vulnerable-001",
+      "vulnerable": true,
+      "file": "src/app.ts",
+      "startLine": 10,
+      "endLine": 10,
+      "ruleIds": ["RULE-EXAMPLE"]
+    },
+    {
+      "id": "example-safe-trap-001",
+      "vulnerable": false,
+      "file": "src/app.ts",
+      "startLine": 30,
+      "endLine": 30,
+      "ruleIds": ["RULE-EXAMPLE"]
+    }
+  ]
+}

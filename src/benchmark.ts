@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -22,7 +23,14 @@ export interface BenchmarkCase {
   split: string;
   language: string;
   file?: string;
-  code: string;
+  code?: string;
+  files?: Array<{ path: string; code: string }>;
+  source?: {
+    kind: "CHECKOUT";
+    path: string;
+    repository?: string;
+    commit?: string;
+  };
   property: string;
   expected: BenchmarkExpected;
   negativeControls?: string[];
@@ -43,6 +51,9 @@ export interface BenchmarkCaseResult {
   coverageUnknown: boolean;
   tokenTotal: number;
   durationMs: number;
+  sourceKind: "INLINE" | "CHECKOUT";
+  sourceRevision?: string;
+  sourceTreeDigest: string;
   runId: string;
 }
 
@@ -114,7 +125,9 @@ async function loadCases(directory: string): Promise<BenchmarkCase[]> {
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
     const parsed = JSON.parse(await fs.readFile(path.join(directory, entry.name), "utf8")) as BenchmarkCase;
-    if (parsed.schemaVersion !== 1 || !parsed.caseId || typeof parsed.code !== "string" || !parsed.expected) throw new Error(`Invalid benchmark case: ${entry.name}`);
+    const hasInlineSource = typeof parsed.code === "string" || (Array.isArray(parsed.files) && parsed.files.length > 0);
+    const hasCheckoutSource = parsed.source?.kind === "CHECKOUT" && typeof parsed.source.path === "string" && typeof parsed.source.commit === "string" && /^[a-f0-9]{40,64}$/i.test(parsed.source.commit);
+    if (parsed.schemaVersion !== 1 || !parsed.caseId || (!hasInlineSource && !hasCheckoutSource) || !parsed.expected) throw new Error(`Invalid benchmark case: ${entry.name}`);
     cases.push(parsed);
   }
   return cases.sort((left, right) => left.caseId.localeCompare(right.caseId));
@@ -140,13 +153,73 @@ async function verifyBenchmarkManifest(casesDirectory: string, cases: BenchmarkC
   }
 }
 
-async function runCase(item: BenchmarkCase, options: BenchmarkOptions = {}): Promise<BenchmarkCaseResult> {
+function safeRelative(value: string): string {
+  const normalized = value.split(path.sep).join("/").replace(/^\.\//, "");
+  if (!normalized || normalized.startsWith("../") || normalized.includes("/../") || path.posix.isAbsolute(normalized)) throw new Error(`Benchmark source path escapes the case root: ${value}`);
+  return normalized;
+}
+
+async function copyCheckout(sourceRoot: string, targetRoot: string): Promise<void> {
+  const ignoredDirectories = new Set([".git", "node_modules", "dist", "build", "coverage", "audit-runs"]);
+  const ignoredFiles = new Set(["audit.config.json", "audit.playbook.json", "audit.models.json", "audit.threat.json"]);
+  const walk = async (current: string, relativeRoot: string): Promise<void> => {
+    const entries = await fs.readdir(current, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isSymbolicLink()) continue;
+      if (ignoredFiles.has(entry.name)) continue;
+      const relative = relativeRoot ? path.join(relativeRoot, entry.name) : entry.name;
+      if (entry.isDirectory()) {
+        if (ignoredDirectories.has(entry.name)) continue;
+        await walk(path.join(current, entry.name), relative);
+        continue;
+      }
+      const destination = path.join(targetRoot, relative);
+      await fs.mkdir(path.dirname(destination), { recursive: true });
+      await fs.copyFile(path.join(current, entry.name), destination);
+    }
+  };
+  await walk(sourceRoot, "");
+}
+
+function checkoutRevision(sourceRoot: string, expected?: string): string | undefined {
+  if (!expected) return undefined;
+  let actual: string;
+  try {
+    actual = execFileSync("git", ["-C", sourceRoot, "rev-parse", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch {
+    throw new Error(`Benchmark checkout is not a readable git worktree: ${sourceRoot}`);
+  }
+  if (actual !== expected) throw new Error(`Benchmark checkout revision mismatch: expected ${expected}, got ${actual}.`);
+  return actual;
+}
+
+async function materializeCase(root: string, item: BenchmarkCase, casesDirectory: string): Promise<string | undefined> {
+  if (item.source?.kind === "CHECKOUT") {
+    const sourceRoot = path.resolve(casesDirectory, item.source.path);
+    const revision = checkoutRevision(sourceRoot, item.source.commit);
+    await copyCheckout(sourceRoot, root);
+    return revision;
+  }
+  if (item.files && item.files.length > 0) {
+    for (const file of item.files) {
+      const relative = safeRelative(file.path);
+      const target = path.join(root, relative);
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, file.code, "utf8");
+    }
+    return undefined;
+  }
+  const sourceFile = sourceFileFor(item);
+  await fs.mkdir(path.dirname(path.join(root, sourceFile)), { recursive: true });
+  await fs.writeFile(path.join(root, sourceFile), item.code ?? "", "utf8");
+  return undefined;
+}
+
+async function runCase(item: BenchmarkCase, casesDirectory: string, options: BenchmarkOptions = {}): Promise<BenchmarkCaseResult> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "evo-audit-benchmark-"));
   try {
+    const sourceRevision = await materializeCase(root, item, casesDirectory);
     await initWorkspace(root);
-    const sourceFile = sourceFileFor(item);
-    await fs.mkdir(path.dirname(path.join(root, sourceFile)), { recursive: true });
-    await fs.writeFile(path.join(root, sourceFile), item.code, "utf8");
     const startedAt = Date.now();
     const initial = await runAudit(root, { output: path.join(root, "runs") });
     let run = initial.run;
@@ -187,6 +260,9 @@ async function runCase(item: BenchmarkCase, options: BenchmarkOptions = {}): Pro
       coverageUnknown: run.plan?.tasks.some((task) => task.phase === "HUNT" && task.status !== "COMPLETED") ?? true,
       tokenTotal: run.tokenAccounting.inputTokens + run.tokenAccounting.outputTokens,
       durationMs,
+      sourceKind: item.source ? "CHECKOUT" : "INLINE",
+      sourceRevision,
+      sourceTreeDigest: run.snapshot.treeDigest,
       runId: run.runId,
     };
   } finally {
@@ -200,7 +276,7 @@ export async function runBenchmark(directory: string, split?: string, options: B
   const cases = allCases.filter((item) => !split || item.split === split);
   if (cases.length === 0) throw new Error(`No benchmark cases found${split ? ` for split ${split}` : ""}.`);
   const results: BenchmarkCaseResult[] = [];
-  for (const item of cases) results.push(await runCase(item, options));
+  for (const item of cases) results.push(await runCase(item, directory, options));
   const expected = results.filter((item) => item.expectedVulnerable);
   const reported = results.filter((item) => item.candidateFound);
   const matching = expected.filter((item) => item.matchingCandidate);

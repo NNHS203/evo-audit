@@ -63,6 +63,13 @@ evo-audit compare ./before/run.json ./after/run.json
 # until the after snapshot has validated semantic coverage.
 evo-audit revalidate ./before/run.json ./after/run.json
 
+# Score an Evo Audit run or an external SARIF scanner output against labels.
+evo-audit score ./ground-truth.json ./audit-runs/<run>/run.json --format run
+evo-audit score ./ground-truth.json ./external.sarif --format sarif
+# RealVuln per-repository ground-truth.json is also accepted.
+evo-audit score ./realvuln-ground-truth.json ./external.sarif \
+  --format sarif --ground-truth-format realvuln
+
 # Inspect the prioritized investigation and validation queue.
 evo-audit plan ./audit-runs/<run>/run.json
 

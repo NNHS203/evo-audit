@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import os from "node:os";
@@ -19,6 +20,7 @@ import { runValidationRequest } from "../src/validation-runner.js";
 import { deduplicateRun } from "../src/dedup.js";
 import { buildRevalidationPlan } from "../src/revalidation.js";
 import { evaluateBenchmark, runBenchmark, type BenchmarkReport } from "../src/benchmark.js";
+import { groundTruthLabelsFromValue, scannerFindingsFromSarif, scoreScannerFindings } from "../src/scoring.js";
 
 test("candidate detection masks fixtures, comments, and descriptions but keeps code", () => {
   const source = [
@@ -684,4 +686,54 @@ test("model-backed benchmark reuses the same bounded worker protocol", async () 
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
+});
+
+test("scanner scoring separates candidate and evidence-gated reportable performance", () => {
+  const labels = [
+    { id: "vuln-1", vulnerable: true, file: "src/app.ts", startLine: 10, ruleIds: ["RULE-1"] },
+    { id: "trap-1", vulnerable: false, file: "src/app.ts", startLine: 30, ruleIds: ["RULE-1"] },
+  ];
+  const sarif = {
+    version: "2.1.0",
+    runs: [{ tool: { driver: { name: "external-scanner" } }, results: [
+      { ruleId: "RULE-1", locations: [{ physicalLocation: { artifactLocation: { uri: "src/app.ts" }, region: { startLine: 10 } } }], properties: { reportable: true } },
+      { ruleId: "RULE-1", locations: [{ physicalLocation: { artifactLocation: { uri: "src/app.ts" }, region: { startLine: 30 } } }], properties: { reportable: false } },
+    ] }],
+  };
+  const findings = scannerFindingsFromSarif(sarif);
+  const score = scoreScannerFindings(findings, labels, { inputTokens: 100, outputTokens: 20, durationMs: 50 });
+  assert.equal(score.candidate.truePositive, 1);
+  assert.equal(score.candidate.falsePositive, 1);
+  assert.equal(score.candidate.recall, 1);
+  assert.equal(score.reportable.truePositive, 1);
+  assert.equal(score.reportable.falsePositive, 0);
+  assert.equal(score.reportable.tokensPerValidatedFinding, 120);
+  const realVulnLabels = groundTruthLabelsFromValue({ findings: [{ id: "rv-1", is_vulnerable: true, file: "src/app.ts", location: { start_line: 10, end_line: 12 }, primary_cwe: "CWE-79", acceptable_cwes: ["CWE-79", "CWE-80"] }] }, "REALVULN");
+  assert.deepEqual(realVulnLabels[0], { id: "rv-1", vulnerable: true, file: "src/app.ts", startLine: 10, endLine: 12, ruleIds: ["CWE-79", "CWE-80"] });
+});
+
+test("benchmark runner can audit a pinned-style local checkout source", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-benchmark-checkout-"));
+  const casesDirectory = path.join(root, "cases");
+  const checkout = path.join(root, "checkout");
+  await mkdir(casesDirectory, { recursive: true });
+  await mkdir(checkout, { recursive: true });
+  await writeFile(path.join(checkout, "app.ts"), "export function run(req) { return eval(req.body.code); }\n", "utf8");
+  execFileSync("git", ["init", "-q"], { cwd: checkout, stdio: "ignore" });
+  execFileSync("git", ["-c", "user.name=Evo Audit Test", "-c", "user.email=evo-audit@example.invalid", "add", "app.ts"], { cwd: checkout, stdio: "ignore" });
+  execFileSync("git", ["-c", "user.name=Evo Audit Test", "-c", "user.email=evo-audit@example.invalid", "commit", "-qm", "fixture"], { cwd: checkout, stdio: "ignore" });
+  const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: checkout, encoding: "utf8" }).trim();
+  await writeFile(path.join(casesDirectory, "checkout-case.json"), JSON.stringify({
+    schemaVersion: 1,
+    caseId: "local-checkout-001",
+    split: "development",
+    language: "typescript",
+    source: { kind: "CHECKOUT", path: "../checkout", repository: "local-fixture", commit },
+    property: "A checkout source remains auditable without embedding its code in the case JSON.",
+    expected: { vulnerable: true, ruleId: "JS-DYNAMIC-CODE-001" },
+  }), "utf8");
+  const report = await runBenchmark(casesDirectory, "development");
+  assert.equal(report.cases[0].sourceKind, "CHECKOUT");
+  assert.equal(report.cases[0].sourceTreeDigest.length, 64);
+  assert.equal(report.cases[0].candidateFound, true);
 });
