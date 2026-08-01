@@ -107,7 +107,7 @@ export function validateResultAgainstRun(run: AuditRun, result: ValidationResult
 export function createValidationRequest(
   run: AuditRun,
   finding: Finding,
-  options: { reproducerCommand: string; negativeControlCommand: string; timeoutMs?: number; sandboxProfile?: ValidationRequest["sandboxProfile"] },
+  options: { reproducerCommand: string; negativeControlCommand: string; timeoutMs?: number; sandboxProfile?: ValidationRequest["sandboxProfile"]; image?: string },
 ): ValidationRequest {
   return {
     schemaVersion: 1,
@@ -120,6 +120,7 @@ export function createValidationRequest(
     negativeControlCommand: options.negativeControlCommand,
     timeoutMs: options.timeoutMs ?? 30_000,
     sandboxProfile: options.sandboxProfile ?? "READ_ONLY_NO_NETWORK",
+    image: options.image,
   };
 }
 

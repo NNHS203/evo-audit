@@ -185,6 +185,7 @@ function mergeFinding(run: AuditRun, result: AuditWorkerResult, candidate: Audit
       ...(candidate.limitations ?? []),
       ...(claim.limitation ? [claim.limitation.detail] : []),
     ]),
+    proposedValidation: candidate.proposedValidation ?? existing?.proposedValidation,
     worker: result.worker,
   };
 

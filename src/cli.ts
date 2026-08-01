@@ -9,7 +9,8 @@ import { runValidationRequest } from "./validation-runner.js";
 import { mergeWorkerResult } from "./workers.js";
 import { buildAuditPlan, planSummary } from "./workflow.js";
 import { authorizeModel, loadModelConfig, ModelRegistry } from "./models.js";
-import { executeWorkerTask } from "./worker-runner.js";
+import { executePendingWorkerTasks, executeWorkerTask } from "./worker-runner.js";
+import { runProposedValidations } from "./proposed-validation.js";
 import { evaluateBenchmark, runBenchmark } from "./benchmark.js";
 import { buildRevalidationPlan } from "./revalidation.js";
 import { groundTruthLabelsFromValue, scannerFindingsFromBandit, scannerFindingsFromRun, scannerFindingsFromSarif, scoreScannerFindings, type GroundTruthFormat } from "./scoring.js";
@@ -23,7 +24,7 @@ Commands:
   init <path>                         Create audit.config.json and audit.playbook.json
   models <path> [--config FILE]       List configured API/OAuth models and credential state
   auth <path> <model-id>               Authorize a configured model with OAuth PKCE
-  review <path> [--output DIR]        Run the audit core in review mode
+  review <path> [--output DIR]        Run audit; --model/--workers adds bounded model review
   run <path> [--output DIR]           Alias for review
   run <path> --baseline RUN.json      Record semantic delta for worker prioritization
   run <path> --strict                 Show only evidence-policy reportable findings
@@ -39,6 +40,8 @@ Commands:
   ingest <run.json> <worker.json>     Merge a Frontier worker result into a saved run
   worker <run.json> <task-id>         Run one HUNT/INVESTIGATE task with a configured model
   worker <run.json> --all             Run pending worker tasks with bounded concurrency
+  review ... --auto-validate          Run only model-proposed controls in the validator sandbox
+  review ... --validation-image IMG   Choose the operator-approved validator image
   benchmark <cases-dir>               Run benchmark cases (optional --model auto)
   realvuln <benchmark-root> <repo-id>  Clone a pinned RealVuln repo and emit a scored report
   realvuln <benchmark-root> --all       Audit every manifest entry and emit an aggregate
@@ -206,8 +209,36 @@ async function main(): Promise<void> {
     const baselinePath = valueFlag(args, "--baseline", "");
     const baseline = baselinePath ? await readJson<AuditRun>(path.resolve(cwd, baselinePath)) : undefined;
     const strict = flag(args, "--strict");
+    const requestedModel = valueFlag(args, "--model", "");
+    const runWorkers = Boolean(requestedModel) || flag(args, "--workers") || flag(args, "--auto-validate");
     const result = await runAudit(target, { output, strict, baseline });
-    console.log(summarizeRun(result.run, strict ? { findingIds: result.run.reportableFindingIds, session: result.session } : { session: result.session }));
+    let updated = result.run;
+    let session = result.session;
+    if (runWorkers) {
+      const modelConfig = await loadModelConfig(target, valueFlag(args, "--config", ""));
+      const registry = new ModelRegistry(modelConfig);
+      const queue = await executePendingWorkerTasks(updated, registry, {
+        model: requestedModel || "auto",
+        concurrency: numberFlag(args, "--concurrency") ?? 2,
+        maxTasks: numberFlag(args, "--max-model-tasks") ?? 64,
+        cacheDirectory: path.join(result.artifactDir, "worker-cache"),
+      });
+      updated = queue.run;
+      session = await persistRunArtifacts(result.artifactDir, updated);
+      console.log(`Workers: ${queue.results.length} tasks  concurrency=${numberFlag(args, "--concurrency") ?? 2}`);
+      if (flag(args, "--auto-validate")) {
+        const validation = await runProposedValidations(updated, {
+          maxFindings: numberFlag(args, "--max-validations") ?? 32,
+          artifactDirectory: path.join(result.artifactDir, "validations"),
+          image: valueFlag(args, "--validation-image", "") || undefined,
+        });
+        updated = validation.run;
+        session = await persistRunArtifacts(result.artifactDir, updated);
+        console.log(`Proposed validations: ${validation.results.length} attempted  ${validation.skipped.length} skipped`);
+        for (const skipped of validation.skipped) console.log(`  - ${skipped.findingId}: ${skipped.reason}`);
+      }
+    }
+    console.log(summarizeRun(updated, strict ? { findingIds: updated.reportableFindingIds, session } : { session }));
     console.log(`Artifacts: ${result.artifactDir}`);
     return;
   }
@@ -376,26 +407,16 @@ async function main(): Promise<void> {
     const requestedModel = valueFlag(args, "--model", "auto");
     const cacheDirectory = path.join(path.dirname(runPath), "worker-cache");
     if (flag(args, "--all")) {
-      const concurrency = Math.max(1, Math.min(8, Number(valueFlag(args, "--concurrency", "2")) || 2));
-      const tasks = (run.plan?.tasks ?? []).filter((task) => ["HUNT", "INVESTIGATE"].includes(task.phase) && task.status === "PENDING").sort((left, right) => right.priority - left.priority || left.id.localeCompare(right.id));
-      let cursor = 0;
-      const results: AuditWorkerResult[] = [];
-      const worker = async (): Promise<void> => {
-        while (cursor < tasks.length) {
-          const task = tasks[cursor++];
-          const selected = registry.select({ phase: task.phase, priority: task.priority, estimatedInputTokens: 0, budgetTokens: task.budgetTokens, requiredCapabilities: [task.phase, "JSON"], model: requestedModel });
-          try {
-            results.push(await executeWorkerTask(run, task, registry, selected.id, { cacheDirectory }));
-          } catch (error) {
-            results.push({ worker: selected.id, taskId: task.id, error: error instanceof Error ? error.message : String(error), findings: [] });
-          }
-        }
-      };
-      await Promise.all(Array.from({ length: Math.min(concurrency, Math.max(1, tasks.length)) }, () => worker()));
-      let updated = run;
-      for (const result of results.sort((left, right) => (left.taskId ?? "").localeCompare(right.taskId ?? ""))) updated = mergeWorkerResult(updated, result);
+      const concurrency = numberFlag(args, "--concurrency") ?? 2;
+      const queue = await executePendingWorkerTasks(run, registry, {
+        model: requestedModel,
+        concurrency,
+        maxTasks: numberFlag(args, "--max-model-tasks") ?? 64,
+        cacheDirectory,
+      });
+      const updated = queue.run;
       const session = await persistRunArtifacts(path.dirname(runPath), updated);
-      console.log(`Workers: ${results.length} tasks  concurrency=${concurrency}`);
+      console.log(`Workers: ${queue.results.length} tasks  concurrency=${concurrency}`);
       console.log(summarizeRun(updated, { session }));
       console.log(`Updated: ${runPath}`);
       return;

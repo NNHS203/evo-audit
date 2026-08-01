@@ -107,6 +107,17 @@ export interface SourceLocation {
   snippet: string;
 }
 
+/**
+ * A model-suggested validation command is an untrusted proposal. It is never
+ * evidence by itself and must only be executed through the independent
+ * validator sandbox after an explicit operator opt-in.
+ */
+export interface ValidationProposal {
+  reproducerCommand: string;
+  negativeControlCommand: string;
+  timeoutMs?: number;
+}
+
 export interface EvidenceItem {
   type: "STATIC_PATTERN" | "TRACE" | "REPRODUCER" | "TOOL_RESULT" | "LIMITATION";
   title: string;
@@ -140,6 +151,7 @@ export interface Finding {
   locations: SourceLocation[];
   evidence: EvidenceItem[];
   limitations: string[];
+  proposedValidation?: ValidationProposal;
   worker?: string;
 }
 

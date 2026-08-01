@@ -64,6 +64,15 @@ bounded second pass, never a clean verdict. Worker receipts make replay and
 local prompt/model cache hits idempotent. Deterministic dedup clusters only
 matching source snippets and keeps distinct sink instances separate.
 
+`review --model auto` executes this queue end to end: it completes HUNT tasks,
+rebuilds the plan, and then runs INVESTIGATE tasks with bounded concurrency.
+Workers can return a `proposedValidation` pair, but the proposal is inert until
+the operator supplies `--auto-validate`. That opt-in sends only the positive
+and negative controls to the independent read-only, no-network container
+validator; a model response alone never becomes proof. The operator chooses
+the container image (`--validation-image`); model output cannot choose the
+runtime or widen the sandbox.
+
 ### 4. Evidence state
 
 The state machine is intentionally conservative:

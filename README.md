@@ -42,6 +42,15 @@ The package installs as `evo-audit` when linked or published.
 # Review a repository and persist a replayable run.
 evo-audit review .
 
+# Run the bounded HUNT/INVESTIGATE queue with the configured auto model.
+# The model remains an investigator; it cannot create VERIFIED evidence.
+evo-audit review . --model auto --concurrency 2 --max-model-tasks 64
+
+# Explicitly opt in to executing model-proposed positive/negative controls in
+# the independent read-only, no-network validator sandbox.
+evo-audit review . --model auto --auto-validate --max-validations 16 \
+  --validation-image node:22-alpine
+
 # Preserve full coverage while exposing changed files to workers.
 evo-audit review . --baseline ./audit-runs/<previous-run>/run.json
 
@@ -178,6 +187,15 @@ proof by itself.
 
 Worker claims are deliberately downgraded to hypotheses/supporting evidence.
 The validator-owned ledger is the only path to `VERIFIED`.
+
+`review --model auto` is the turnkey version of this loop: it runs pending
+HUNT tasks first, merges them deterministically, then replans and runs
+INVESTIGATE tasks with bounded concurrency. A worker may attach a
+`proposedValidation` pair, but those commands are inert until
+`--auto-validate` is explicitly supplied. Auto-validation uses the independent
+container runner, a read-only source mount, no network, and the same snapshot
+integrity gate as `validate-run`. The runtime image is operator-selected with
+`--validation-image`; the model cannot choose an image or expand the sandbox.
 
 ## Bring your own model
 

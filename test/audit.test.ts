@@ -15,7 +15,7 @@ import type { AuditRun } from "../src/types.js";
 import { applyValidationResult, assertWorkspaceMatchesSnapshot, validateResultAgainstRun } from "../src/validator.js";
 import { mergeWorkerResult } from "../src/workers.js";
 import { loadModelConfig, ModelRegistry } from "../src/models.js";
-import { workerResultFromCompletion } from "../src/worker-runner.js";
+import { executePendingWorkerTasks, workerResultFromCompletion } from "../src/worker-runner.js";
 import { runValidationRequest } from "../src/validation-runner.js";
 import { deduplicateRun } from "../src/dedup.js";
 import { buildRevalidationPlan } from "../src/revalidation.js";
@@ -294,6 +294,74 @@ test("worker protocol rejects malformed model JSON and blocks the task", async (
   assert.match(result.error ?? "", /valid JSON/i);
   const blocked = mergeWorkerResult(run, result);
   assert.equal(blocked.plan?.tasks.find((candidate) => candidate.id === task.id)?.status, "BLOCKED");
+});
+
+test("worker validation proposals remain inert and bounded", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-worker-proposal-"));
+  await initWorkspace(root);
+  await writeFile(path.join(root, "safe.ts"), "export const safe = true;\n", "utf8");
+  const { run } = await runAudit(root, { output: path.join(root, "runs") });
+  const task = run.plan?.tasks.find((candidate) => candidate.phase === "HUNT" && candidate.status === "PENDING");
+  assert.ok(task);
+  const result = workerResultFromCompletion({
+    requestId: "proposal-1",
+    modelId: "test-model",
+    providerModel: "test",
+    text: JSON.stringify({ findings: [{
+      ruleId: "MODEL-CANDIDATE-001",
+      title: "Model candidate",
+      status: "VERIFIED",
+      evidenceTier: "T2_REPRODUCIBLE",
+      locations: [{ file: "safe.ts", line: 1, column: 1, endLine: 1, snippet: "export const safe = true;" }],
+      proposedValidation: { reproducerCommand: "node -e \"process.exit(0)\"", negativeControlCommand: "node -e \"process.exit(0)\"", timeoutMs: 500 },
+    }] }),
+    usage: { inputTokens: 20, outputTokens: 12, cachedTokens: 0, estimatedCostUsd: 0, source: "WORKER_REPORTED" },
+  }, task);
+  const merged = mergeWorkerResult(run, result);
+  assert.equal(merged.findings.some((finding) => finding.proposedValidation?.reproducerCommand.includes("process.exit(0)")), true);
+  assert.equal(merged.findings.some((finding) => finding.status === "VERIFIED"), false);
+
+  const bounded = workerResultFromCompletion({
+    requestId: "proposal-2",
+    modelId: "test-model",
+    providerModel: "test",
+    text: JSON.stringify({ findings: [{
+      ruleId: "MODEL-CANDIDATE-002",
+      title: "Oversized proposal",
+      status: "SUSPECTED",
+      evidenceTier: "T0_HYPOTHESIS",
+      proposedValidation: { reproducerCommand: "x".repeat(4_001), negativeControlCommand: "node -e \"process.exit(0)\"" },
+    }] }),
+    usage: { inputTokens: 20, outputTokens: 12, cachedTokens: 0, estimatedCostUsd: 0, source: "WORKER_REPORTED" },
+  }, task);
+  assert.equal(bounded.findings[0].proposedValidation, undefined);
+});
+
+test("pending worker queue runs HUNT before a bounded INVESTIGATE pass", async () => {
+  const server = createServer((_request, response) => {
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ id: "queue-worker", choices: [{ message: { content: "{\"findings\":[],\"notes\":[\"no candidate\"]}" }, finish_reason: "stop" }], usage: { prompt_tokens: 20, completion_tokens: 5 } }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-worker-queue-"));
+  try {
+    await initWorkspace(root);
+    await writeFile(path.join(root, "safe.ts"), "export const safe = true;\n", "utf8");
+    const { run } = await runAudit(root, { output: path.join(root, "runs") });
+    const registry = new ModelRegistry({
+      schemaVersion: 1,
+      auto: { enabled: true, preferred: ["local"], minimumQualityTier: 1 },
+      models: [{ id: "local", transport: "OPENAI_COMPATIBLE", model: "test", baseUrl: `http://127.0.0.1:${address.port}`, auth: { method: "NONE" }, qualityTier: 3, capabilities: ["HUNT", "INVESTIGATE", "JSON"] }],
+    });
+    const queued = await executePendingWorkerTasks(run, registry, { model: "local", maxTasks: 2, concurrency: 2, cacheDirectory: path.join(root, "cache") });
+    assert.equal(queued.results.length, 2);
+    assert.equal(queued.results.every((item) => !item.error), true);
+    assert.equal(queued.run.tokenAccounting.inputTokens, 40);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
 });
 
 test("OpenAI-compatible provider normalizes completion text and token usage", async () => {

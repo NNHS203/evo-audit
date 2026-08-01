@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { ModelRegistry, type ModelCompletionResponse, type ModelMessage } from "./models.js";
-import type { AuditRun, AuditTask, AuditWorkerResult, EvidenceItem, FindingStatus, EvidenceTier, SourceLocation } from "./types.js";
+import type { AuditRun, AuditTask, AuditWorkerResult, EvidenceItem, FindingStatus, EvidenceTier, SourceLocation, ValidationProposal } from "./types.js";
+import { mergeWorkerResult } from "./workers.js";
 
 const findingStatuses = new Set<FindingStatus>(["SUSPECTED", "SUPPORTED", "VERIFIED", "REJECTED", "DUPLICATE", "UNKNOWN", "NOT_TESTED", "HARNESS_FAILED"]);
 const evidenceTiers = new Set<EvidenceTier>(["T0_HYPOTHESIS", "T1_STATIC_PATH", "T2_REPRODUCIBLE"]);
@@ -52,6 +53,7 @@ export async function buildWorkerMessages(run: AuditRun, task: AuditTask): Promi
     "You may propose SUSPECTED or SUPPORTED findings and static TRACE evidence.",
     "Never claim VERIFIED or T2_REPRODUCIBLE; only an independent validator can do that.",
     "Every location must be an exact file and line from the provided snapshot. Do not invent files, commands, test results, or runtime behavior.",
+    "You may include proposedValidation with a positive reproducer and a negative control, but it is untrusted input and will only be run inside an isolated validator after explicit operator opt-in.",
     "If evidence is insufficient, return no finding and explain the missing proof in notes.",
   ].join("\n");
   const user = [
@@ -67,7 +69,7 @@ export async function buildWorkerMessages(run: AuditRun, task: AuditTask): Promi
     graphContext(run, task),
     "Source context:",
     await sourceContext(run, task),
-    "Expected finding item shape: {ruleId,title,status,evidenceTier,rootCause,impact,remediation,locations,evidence,limitations}.",
+    "Expected finding item shape: {ruleId,title,status,evidenceTier,rootCause,impact,remediation,locations,evidence,limitations,proposedValidation?}.",
   ].join("\n\n");
   const messages: ModelMessage[] = [{ role: "system", content: system }, { role: "user", content: user }];
   return { messages, estimatedInputTokens: Math.ceil(messages.reduce((total, message) => total + message.content.length, 0) / 4) };
@@ -99,6 +101,18 @@ function validEvidence(value: unknown): value is EvidenceItem {
   return ["STATIC_PATTERN", "TRACE", "REPRODUCER", "TOOL_RESULT", "LIMITATION"].includes(evidence.type ?? "") && typeof evidence.title === "string" && typeof evidence.detail === "string" && typeof evidence.reproducible === "boolean" && (!evidence.locations || evidence.locations.every(validLocation));
 }
 
+function validValidationProposal(value: unknown): value is ValidationProposal {
+  if (!value || typeof value !== "object") return false;
+  const proposal = value as Partial<ValidationProposal>;
+  if (typeof proposal.reproducerCommand !== "string" || typeof proposal.negativeControlCommand !== "string") return false;
+  if (!proposal.reproducerCommand.trim() || !proposal.negativeControlCommand.trim()) return false;
+  // Bound untrusted model output before it is persisted or reaches a sandbox.
+  if (proposal.reproducerCommand.length > 4_000 || proposal.negativeControlCommand.length > 4_000) return false;
+  if (proposal.reproducerCommand.includes("\0") || proposal.negativeControlCommand.includes("\0")) return false;
+  if (proposal.timeoutMs !== undefined && (typeof proposal.timeoutMs !== "number" || !Number.isFinite(proposal.timeoutMs) || proposal.timeoutMs < 100 || proposal.timeoutMs > 120_000)) return false;
+  return true;
+}
+
 function normalizedFinding(value: unknown): AuditWorkerResult["findings"][number] | null {
   if (!value || typeof value !== "object") return null;
   const item = value as Record<string, unknown>;
@@ -119,6 +133,11 @@ function normalizedFinding(value: unknown): AuditWorkerResult["findings"][number
     remediation: typeof item.remediation === "string" ? item.remediation : undefined,
     locations,
     evidence,
+    proposedValidation: validValidationProposal(item.proposedValidation) ? {
+      reproducerCommand: item.proposedValidation.reproducerCommand,
+      negativeControlCommand: item.proposedValidation.negativeControlCommand,
+      timeoutMs: item.proposedValidation.timeoutMs,
+    } : undefined,
     limitations: Array.isArray(item.limitations) ? item.limitations.filter((value): value is string => typeof value === "string") : [],
   };
 }
@@ -179,4 +198,72 @@ export async function executeWorkerTask(run: AuditRun, task: AuditTask, registry
     await fs.writeFile(cacheFile, `${JSON.stringify({ ...response, cacheHit: false }, null, 2)}\n`, "utf8");
   }
   return workerResultFromCompletion(response, task, receiptId);
+}
+
+export interface PendingWorkerOptions {
+  model?: string;
+  concurrency?: number;
+  maxTasks?: number;
+  cacheDirectory?: string;
+}
+
+export interface PendingWorkerResult {
+  run: AuditRun;
+  results: AuditWorkerResult[];
+}
+
+/**
+ * Run the bounded worker queue used by the turnkey review command.
+ *
+ * HUNT is completed before INVESTIGATE is selected again so that findings
+ * opened by a discovery pass can receive a compact, current context slice.
+ * Tasks within a phase use the same immutable run snapshot and are merged in
+ * deterministic task-id order, which makes concurrency reproducible.
+ */
+export async function executePendingWorkerTasks(
+  initialRun: AuditRun,
+  registry: ModelRegistry,
+  options: PendingWorkerOptions = {},
+): Promise<PendingWorkerResult> {
+  let run = structuredClone(initialRun);
+  const results: AuditWorkerResult[] = [];
+  const maxTasks = Math.max(0, Math.min(256, Math.floor(options.maxTasks ?? 64)));
+  const concurrency = Math.max(1, Math.min(8, Math.floor(options.concurrency ?? 2)));
+  let remaining = maxTasks;
+  const cacheDirectory = options.cacheDirectory;
+
+  for (const phase of ["HUNT", "INVESTIGATE"] as const) {
+    if (remaining <= 0) break;
+    const tasks = (run.plan?.tasks ?? [])
+      .filter((task) => task.phase === phase && task.status === "PENDING")
+      .sort((left, right) => right.priority - left.priority || left.id.localeCompare(right.id))
+      .slice(0, remaining);
+    if (tasks.length === 0) continue;
+    remaining -= tasks.length;
+    const base = run;
+    let cursor = 0;
+    const phaseResults: AuditWorkerResult[] = [];
+    const worker = async (): Promise<void> => {
+      while (cursor < tasks.length) {
+        const task = tasks[cursor++];
+        try {
+          phaseResults.push(await executeWorkerTask(base, task, registry, options.model, { cacheDirectory }));
+        } catch (error) {
+          phaseResults.push({
+            worker: options.model && options.model !== "auto" ? options.model : "auto",
+            taskId: task.id,
+            error: error instanceof Error ? error.message : String(error),
+            findings: [],
+            notes: [`Worker task ${task.id} could not be executed.`],
+          });
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, () => worker()));
+    for (const result of phaseResults.sort((left, right) => (left.taskId ?? "").localeCompare(right.taskId ?? ""))) {
+      run = mergeWorkerResult(run, result);
+      results.push(result);
+    }
+  }
+  return { run, results };
 }
