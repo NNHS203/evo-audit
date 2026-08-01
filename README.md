@@ -132,7 +132,10 @@ input plus output; cached tokens are shown separately for transparency.
 summed across the session; deterministic scans report zero model latency.
 Worker tasks also carry a deterministic receipt keyed by snapshot, task,
 model, and prompt. Re-ingesting the same receipt is idempotent, and local
-worker-cache hits do not add provider tokens.
+worker-cache hits do not add provider tokens. If an external `ingest` omits a
+receipt ID, Evo Audit derives one from the snapshot, task, worker, prompt hash,
+error, and finding payload so identical replays still cannot double-count the
+session total.
 
 ## Optimized worker loop
 

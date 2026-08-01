@@ -34,6 +34,17 @@ function stableId(parts: string[]): string {
   return createHash("sha256").update(parts.join("|"), "utf8").digest("hex").slice(0, 20);
 }
 
+function derivedReceiptId(run: AuditRun, result: AuditWorkerResult): string {
+  return createHash("sha256").update(JSON.stringify({
+    snapshot: run.snapshot.treeDigest,
+    worker: result.worker,
+    taskId: result.taskId ?? null,
+    promptHash: result.promptHash ?? null,
+    error: result.error ?? null,
+    findings: result.findings,
+  }), "utf8").digest("hex").slice(0, 32);
+}
+
 function locationKey(location: SourceLocation): string {
   return `${location.file}:${location.line}:${location.column}`;
 }
@@ -347,6 +358,7 @@ function applyHuntCoverageReceipt(run: AuditRun, result: AuditWorkerResult): voi
 }
 
 export function mergeWorkerResult(runInput: AuditRun, result: AuditWorkerResult): AuditRun {
+  result = { ...result, receiptId: result.receiptId ?? derivedReceiptId(runInput, result) };
   let run = structuredClone(runInput);
   if (result.receiptId && run.workerReceipts?.some((receipt) => receipt.receiptId === result.receiptId)) {
     run.notes = uniqueStrings([...run.notes, `Worker receipt ${result.receiptId} was already applied; ingest is idempotent.`]);

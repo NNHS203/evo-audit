@@ -85,7 +85,9 @@ snippet in the pinned source. Evidence locations go through the same check;
 stale, out-of-scope, or hallucinated snippets are dropped and recorded as a
 limitation. Receipts retain the provider model, request ID, prompt hash, finish
 reason, cache state, and usage so a result can be replayed and its token cost
-audited.
+audited. External results that omit a receipt ID receive a deterministic
+derived receipt from the immutable snapshot/task/payload identity, preserving
+session accounting across replayed imports.
 
 ### 4. Evidence state
 

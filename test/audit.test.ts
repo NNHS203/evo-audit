@@ -230,6 +230,26 @@ test("worker receipts make replayed model output token-idempotent", async () => 
   assert.equal(replay.workerReceipts?.length, 1);
 });
 
+test("worker ingest derives a deterministic receipt when callers omit one", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-worker-derived-receipt-"));
+  await initWorkspace(root);
+  await writeFile(path.join(root, "safe.ts"), "export const safe = true;\n", "utf8");
+  const initial = await runAudit(root, { output: path.join(root, "runs") });
+  const taskId = initial.run.plan?.tasks.find((task) => task.phase === "HUNT")?.id;
+  const payload = {
+    worker: "external-worker",
+    taskId,
+    findings: [],
+    tokenAccounting: { inputTokens: 90, outputTokens: 10, cachedTokens: 0, estimatedCostUsd: 0.01 },
+  };
+  const first = mergeWorkerResult(initial.run, payload);
+  const replay = mergeWorkerResult(first, { ...payload });
+  assert.equal(first.tokenAccounting.inputTokens + first.tokenAccounting.outputTokens, 100);
+  assert.equal(replay.tokenAccounting.inputTokens, 90);
+  assert.equal(replay.workerReceipts?.length, 1);
+  assert.match(replay.workerReceipts?.[0]?.receiptId ?? "", /^[a-f0-9]{32}$/);
+});
+
 test("model registry loads API/OAuth references and routes auto tasks without exposing secrets", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-models-"));
   const keyName = "EVO_AUDIT_TEST_PROVIDER_KEY";
