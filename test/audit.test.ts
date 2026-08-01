@@ -672,6 +672,15 @@ test("validator independence and evidence locations are enforced", async () => {
   };
   assert.equal(validateResultAgainstRun(workerRun, valid).accepted, true);
   assert.equal(validateResultAgainstRun(workerRun, { ...valid, validator: "mock-worker" }).accepted, false);
+  const anchoredEvidence = workerRun.findings[0].locations[0];
+  assert.equal(validateResultAgainstRun(workerRun, {
+    ...valid,
+    evidence: [{ type: "TRACE", title: "anchored", detail: "inside snapshot", reproducible: false, locations: [anchoredEvidence] }],
+  }).accepted, true);
+  assert.equal(validateResultAgainstRun(workerRun, {
+    ...valid,
+    evidence: [{ type: "TRACE", title: "forged", detail: "wrong source text", reproducible: false, locations: [{ ...anchoredEvidence, snippet: "not the audited source" }] }],
+  }).accepted, false);
   assert.equal(validateResultAgainstRun(workerRun, {
     ...valid,
     evidence: [{ type: "TRACE", title: "out of scope", detail: "outside", reproducible: false, locations: [{ file: "outside.ts", line: 1, column: 1, endLine: 1, snippet: "outside" }] }],

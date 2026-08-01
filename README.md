@@ -178,7 +178,7 @@ For `VERIFIED`, the validator must provide:
 - a passing reproducer with exit code and output digests;
 - a passing negative control;
 - read-only source execution in a no-network or allowlisted sandbox;
-- evidence mapped to files in the audited snapshot.
+- evidence mapped to files and source snippets in the audited snapshot.
 
 If the workspace changes after the run, validation fails closed. An empty
 finding list or incomplete coverage is never represented as proof of safety.

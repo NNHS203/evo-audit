@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { discoverFiles, loadConfig } from "./core.js";
@@ -40,9 +41,30 @@ function sourceFilesMatchRun(run: AuditRun, result: ValidationResult, targetFile
   return targetFiles.every((file) => expected.has(file) && observed.get(file) === expected.get(file));
 }
 
+function normalizedSnippet(value: string): string {
+  return value.replace(/\r\n/g, "\n").split("\n").map((line) => line.trim().replace(/[ \t]+/g, " ")).join("\n").trim();
+}
+
+function evidenceLocationMatchesRun(run: AuditRun, location: { file: string; line: number; column: number; endLine: number; snippet: string }): boolean {
+  const fingerprint = run.files.find((file) => file.path === location.file);
+  if (!fingerprint || !Number.isInteger(location.line) || !Number.isInteger(location.endLine) || location.line < 1 || location.endLine < location.line || !Number.isInteger(location.column) || location.column < 1 || typeof location.snippet !== "string" || !normalizedSnippet(location.snippet)) return false;
+  if (fingerprint.lineCount !== undefined && location.endLine > fingerprint.lineCount) return false;
+  const root = path.resolve(run.root);
+  const target = path.resolve(root, location.file);
+  if (target !== root && !target.startsWith(`${root}${path.sep}`)) return false;
+  try {
+    const buffer = readFileSync(target);
+    if (createHash("sha256").update(buffer).digest("hex") !== fingerprint.sha256) return false;
+    const lines = buffer.toString("utf8").split(/\r?\n/);
+    const actual = normalizedSnippet(lines.slice(location.line - 1, location.endLine).join("\n"));
+    return actual.includes(normalizedSnippet(location.snippet));
+  } catch {
+    return false;
+  }
+}
+
 function evidenceLocationsMatchRun(run: AuditRun, result: ValidationResult): boolean {
-  const inScope = new Set(run.files.map((file) => file.path));
-  return (result.evidence ?? []).every((item) => (item.locations ?? []).every((location) => inScope.has(location.file) && location.line > 0 && location.column > 0));
+  return (result.evidence ?? []).every((item) => (item.locations ?? []).every((location) => evidenceLocationMatchesRun(run, location)));
 }
 
 function validationEvidence(result: ValidationResult): EvidenceItem[] {
