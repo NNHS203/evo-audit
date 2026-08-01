@@ -458,8 +458,9 @@ function pythonFrameworkPolicyLines(relativePath: string, content: string, playb
   }
 
   const djangoView = /(?:^|\/)app\/views\//.test(normalizedPath) && /\b(?:request|HttpResponse|objects\s*\.)\b/i.test(content);
-  const massAssignmentSurface = /\b(?:request\s*\.\s*(?:POST|form|data|body|json)|payload\s*\.(?:dict|model_dump)|request_data)\b/i.test(content)
-    && /\b(?:update\s*\(\s*\*\*[A-Za-z_]\w*|__dict__\s*\.\s*update\s*\(|setattr\s*\([^\n]*(?:request|payload|data))/.test(content);
+  const policyBlocks = pythonPolicyBlocks(content);
+  const massAssignmentSurface = /\b(?:request\s*\.\s*(?:POST|form|data|body|json|get_json|get_data)|payload\s*\.(?:dict|model_dump)|request_data)\b/i.test(content)
+    && /\b(?:update\s*\(\s*\*\*[A-Za-z_]\w*|__dict__\s*\.\s*update\s*\(|setattr\s*\([^\n]*(?:request|payload|data)|[A-Za-z_]\w*\s*\.\s*update\s*\(\s*(?:payload|change_set|request_data|data)\s*\))/.test(content);
   if (djangoView || massAssignmentSurface) {
     for (const [index, line] of codeLines.entries()) {
       const objectLookup = line.match(/\bobjects\s*\.\s*(?:get|filter)\s*\(([^)]*)\)/i);
@@ -475,6 +476,16 @@ function pythonFrameworkPolicyLines(relativePath: string, content: string, playb
       if (/\b(?:\.\s*)?update\s*\(\s*\*\*[A-Za-z_]\w*/i.test(line)
         && /\b(?:validate_update_form|request\s*\.\s*(?:POST|form|data|body)|update\s*=)/i.test(content)) {
         add(index + 1, "PY-MASS-ASSIGNMENT-001");
+      }
+      const directMappingUpdate = /\b[A-Za-z_]\w*\s*\.\s*update\s*\(\s*(?:payload|change_set|request_data|data)\s*\)/i.test(line);
+      if (directMappingUpdate) {
+        const block = policyBlocks.find((candidate) => index + 1 >= candidate.startLine && index + 1 < candidate.endLine);
+        const requestDerived = block ? /\b(?:request\s*\.\s*(?:POST|form|data|body|json|get_json)|payload\s*=|change_set\s*=|request_data\s*=)\b/i.test(block.body) : false;
+        const rawBlock = block?.rawBody ?? "";
+        const privilegedState = block ? /\b(?:role|roles|is_admin|admin|permission|permissions|owner|credit_limit|approved|tier|balance)\b/i.test(rawBlock) : false;
+        const allowlisted = block ? /\b(?:allowed|allowlist|permitted|writable)_?[A-Za-z_]*\b/i.test(rawBlock)
+          && /\b(?:key|field)\b[^\n]{0,180}\bin\b/i.test(rawBlock) : false;
+        if (block && requestDerived && privilegedState && !allowlisted) add(index + 1, "PY-MASS-ASSIGNMENT-001");
       }
     }
   }
