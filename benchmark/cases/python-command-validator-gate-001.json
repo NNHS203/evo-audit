@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "caseId": "python-command-validator-gate-001",
+  "split": "validator",
+  "language": "python",
+  "file": "src/app.py",
+  "code": "import subprocess\n\ndef run(req):\n    return subprocess.run(req.body.command, shell=True, check=False, capture_output=True, text=True)\n",
+  "property": "The independent validator must demonstrate user-controlled command execution with a positive side effect and a benign negative control.",
+  "expected": {
+    "vulnerable": true,
+    "ruleId": "PY-COMMAND-INJECTION-001",
+    "minimumReportableEvidence": "T2_REPRODUCIBLE"
+  },
+  "validation": {
+    "findingRuleId": "PY-COMMAND-INJECTION-001",
+    "reproducerCommand": "python -c 'from pathlib import Path; from types import SimpleNamespace as S; from src.app import run; result=run(S(body=S(command=\"printf validated > /tmp/evo-audit-positive\"))); assert result.returncode == 0 and Path(\"/tmp/evo-audit-positive\").read_text() == \"validated\"'",
+    "negativeControlCommand": "python -c 'from types import SimpleNamespace as S; from src.app import run; result=run(S(body=S(command=\"printf safe\"))); assert result.returncode == 0 and result.stdout == \"safe\"'",
+    "timeoutMs": 10000,
+    "image": "python:3.12-alpine"
+  },
+  "notes": [
+    "The positive control writes only to the validator tmpfs; the source mount remains read-only.",
+    "The sandbox denies network and does not fall back to host execution."
+  ]
+}

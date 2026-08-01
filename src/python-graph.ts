@@ -316,8 +316,13 @@ function queryConstructionBefore(lines: string[], lineIndex: number, variable: s
 
 function isSafeParameterizedQuery(lines: string[], lineIndex: number, firstArgument: string): boolean {
   const construction = queryConstructionBefore(lines, lineIndex, firstArgument);
-  if (!construction || !/(?:\?|%\s*(?:\([A-Za-z_]\w*\)|[A-Za-z_]))/.test(construction)) return false;
-  const dynamicIdentifier = /["'][^"\n]*["']\s*\.\s*join\s*\(|\b[A-Za-z_]\w*\s*\.\s*keys\s*\(|\bf\s*["'][^\n]*\{\s*(?:key|field|column)\b/i.test(construction);
+  if (!construction) return false;
+  const constructionLines = construction.split(/\r?\n/);
+  const assignment = new RegExp(`^\\s*${firstArgument.replace(/[.*+?^${}()|[\\]\\]/g, "\\\\$&")}\\s*=`);
+  const assignmentIndex = constructionLines.findIndex((line) => assignment.test(line));
+  const queryExpression = assignmentIndex >= 0 ? constructionLines.slice(assignmentIndex).join("\n") : construction;
+  if (!/(?:\?|%\s*(?:\([A-Za-z_]\w*\)|[A-Za-z_]))/.test(queryExpression)) return false;
+  const dynamicIdentifier = /["'][^"\n]*["']\s*\.\s*join\s*\(|\b[A-Za-z_]\w*\s*\.\s*keys\s*\(|\bf\s*["'][^\n]*\{\s*(?:key|field|column)\b/i.test(queryExpression);
   if (!dynamicIdentifier) return true;
   // Dynamic column names are safe only when the source shows an explicit
   // allowlist membership check. Bound values alone do not make identifiers

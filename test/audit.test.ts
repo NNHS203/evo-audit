@@ -940,8 +940,16 @@ test("Python graph keeps bound SQL parameters and browser clients out of server-
     "    query = \"\"\"UPDATE users SET email = ? WHERE id = ?\"\"\"",
     "    cursor.execute(query, (email, 1))",
   ].join("\n"), "utf8");
+  await writeFile(path.join(root, "unsafe_after_safe.py"), [
+    "def lookup(req, cursor):",
+    "    cursor.execute('SELECT name FROM users WHERE name = ?', (req.body.name,))",
+    "    query = \"SELECT name FROM users WHERE name = '\" + req.body.name + \"'\"",
+    "    return cursor.execute(query).fetchall()",
+  ].join("\n"), "utf8");
   const result = await runAudit(root, { output: path.join(root, "runs") });
-  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-SQL-INJECTION-001"), false);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-SQL-INJECTION-001" && finding.locations.some((location) => location.file === "app.py")), false);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-SQL-INJECTION-001" && finding.locations.some((location) => location.file === "multiline.py")), false);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-SQL-INJECTION-001" && finding.locations.some((location) => location.file === "unsafe_after_safe.py")), true);
   assert.equal(result.run.findings.some((finding) => finding.ruleId.includes("SSRF") && finding.locations.some((location) => location.file === "client.ts")), false);
 });
 

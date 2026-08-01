@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "caseId": "python-sql-validator-gate-001",
+  "split": "validator",
+  "language": "python",
+  "file": "src/app.py",
+  "code": "import sqlite3\n\ndef lookup(req):\n    connection = sqlite3.connect(':memory:')\n    connection.execute('CREATE TABLE users(name TEXT)')\n    connection.executemany('INSERT INTO users(name) VALUES (?)', [('alice',), ('bob',)])\n    query = \"SELECT name FROM users WHERE name = '\" + req.body.name + \"'\"\n    return connection.execute(query).fetchall()\n",
+  "property": "The independent validator must show that a request-controlled SQL value changes query semantics while a normal value returns only its own record.",
+  "expected": {
+    "vulnerable": true,
+    "ruleId": "PY-SQL-INJECTION-001",
+    "minimumReportableEvidence": "T2_REPRODUCIBLE"
+  },
+  "validation": {
+    "findingRuleId": "PY-SQL-INJECTION-001",
+    "reproducerCommand": "python -c 'from types import SimpleNamespace as S; from src.app import lookup; payload=chr(39)+\" OR \"+chr(39)+\"1\"+chr(39)+\"=\"+chr(39)+\"1\"; assert len(lookup(S(body=S(name=payload)))) == 2'",
+    "negativeControlCommand": "python -c 'from types import SimpleNamespace as S; from src.app import lookup; assert len(lookup(S(body=S(name=\"alice\")))) == 1'",
+    "timeoutMs": 10000,
+    "image": "python:3.12-alpine"
+  },
+  "notes": [
+    "The validator uses an in-memory SQLite database and no network.",
+    "The positive and negative controls exercise the same source snapshot."
+  ]
+}

@@ -193,6 +193,25 @@ The current deterministic observation is candidate precision `1.000`, recall
 `1.000`, and FPR `0.000` on these eight cases; it remains a holdout observation,
 and reportable recall is `0.000` until independent validation runs.
 
+### Independent validator holdout
+
+The manifest's separate `validator` split contains three dependency-free proof
+cases: JavaScript dynamic code execution, Python shell command injection, and
+Python SQL injection. Each case has an independent positive reproducer and a
+negative control; the positive and negative commands run in separate
+read-only-source, no-network containers. This split is intentionally small and
+auditable: it tests whether candidate discovery can hand a reproducible claim
+to the validator without counting static evidence as proof.
+
+```bash
+npm run benchmark:validator-ci
+```
+
+The deterministic pre-validation observation is candidate recall `1.000`,
+precision `1.000`, and FPR `0.000` across all three cases. The proof gate still
+requires Linux Docker/Podman execution and `reportableRecall=1`; a workstation
+without a container daemon must report `BLOCKED`, never a clean result.
+
 [RepoAudit](https://arxiv.org/abs/2501.18160) is an important research baseline:
 it combines repository exploration, data-flow facts, path-condition checks, and
 a validator. Its published numbers are paper-reported reference points, not

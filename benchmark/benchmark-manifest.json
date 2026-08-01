@@ -87,6 +87,18 @@
       "sha256": "0fdc47a4497856028b4863664fd43bdcdeb84fbf3dd66836d581e150ef4c62a4"
     },
     {
+      "file": "cases/python-command-validator-gate-001.json",
+      "caseId": "python-command-validator-gate-001",
+      "split": "validator",
+      "sha256": "128e322d4196edef5be227b40612e7194e92df6eeb08206d41fff4608078764d"
+    },
+    {
+      "file": "cases/python-sql-validator-gate-001.json",
+      "caseId": "python-sql-validator-gate-001",
+      "split": "validator",
+      "sha256": "cf8765540f46065ba9bf185c245da48c10e5eec3b3ef28d8e276d088390e22f5"
+    },
+    {
       "file": "cases/python-django-idor-001.json",
       "caseId": "framework-django-idor-001",
       "split": "framework-holdout",
