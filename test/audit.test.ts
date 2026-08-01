@@ -772,6 +772,7 @@ test("Python graph tracks local assignments and helper summaries without flaggin
     "def safe():",
     "    return subprocess.run(['echo', 'fixed'], check=True)",
   ].join("\n"), "utf8");
+  await writeFile(path.join(root, "utility.py"), "import os\nvalue = os.environ.get('PATH')\nsite = '/tmp/' + value\n", "utf8");
   const result = await runAudit(root, { output: path.join(root, "runs") });
   assert.equal(result.run.recon?.projectKind, "PYTHON");
   assert.equal(result.run.recon?.codeGraph?.flows.some((flow) => flow.reason.includes("Python helper")), true);
@@ -802,4 +803,5 @@ test("Python property graph separates HTML output, password storage, and protect
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-CLEARTEXT-PASSWORD-001"), true);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-MISSING-AUTH-001" && finding.locations.some((location) => location.line === 4)), true);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-MISSING-AUTH-001" && finding.locations.some((location) => location.line === 10)), false);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-REFLECTED-XSS-001" && finding.locations.some((location) => location.file === "utility.py")), false);
 });

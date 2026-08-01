@@ -261,7 +261,7 @@ function pythonMissingAuthLines(content: string, playbook: AuditPlaybook): Map<n
   let pendingRouteLine: number | null = null;
   for (let index = 0; index < codeLines.length; index += 1) {
     const code = codeLines[index] ?? "";
-    if (/^\s*@[^\n]*\broute\s*\(/.test(code)) {
+    if (/^\s*@[^\n]*(?:\broute|\b(?:get|post|put|patch|delete))\s*\(/.test(code)) {
       pendingRouteLine = index + 1;
       continue;
     }

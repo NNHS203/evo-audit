@@ -48,7 +48,7 @@ const sinkPatterns: Array<{ kind: string; pattern: RegExp }> = [
   { kind: "OUTBOUND_REQUEST", pattern: /\b(?:requests|httpx|urllib\s*\.\s*request|urlopen)\s*\.\s*(?:get|post|put|patch|request|urlopen)\s*\(/gi },
   { kind: "XML_PARSE", pattern: /\b(?:etree\s*\.\s*(?:XMLParser|fromstring|parse)|XMLParser|fromstring)\s*\(/gi },
   { kind: "UNSAFE_DESERIALIZATION", pattern: /\b(?:pickle|marshal|yaml)\s*\.\s*(?:loads|load)\s*\(/gi },
-  { kind: "HTML_OUTPUT", pattern: /\b(?:return|make_response|Response)\b[^\r\n]*(?:\+|%)[^\r\n]*|\b(?:parsed_xml|name|address|expression|result)\b[^\r\n]*(?:\+|%)[^\r\n]*/gi },
+  { kind: "HTML_OUTPUT", pattern: /\b(?:return|make_response|Response)\b[^\r\n]*(?:\+|%)[^\r\n]*|(?:\+|%)[^\r\n]*\b[A-Za-z_]\w*\b[^\r\n]*(?:\+|%|(?:request|req)\s*\.)|(?:\+|%)[^\r\n]*\b(?:request|req)\s*\./gi },
   { kind: "PASSWORD_STORAGE", pattern: /\b(?:password|passwd|secret)\s*=\s*(?:request|req|user_input|input|raw_input)\b/gi },
   { kind: "PATH_FILE", pattern: /\b(?:open|send_file|send_from_directory)\s*\(/gi },
 ];
@@ -195,9 +195,10 @@ function sourceMatches(line: string): Array<{ index: number; text: string }> {
   return [...line.matchAll(sourcePattern)].map((match) => ({ index: match.index ?? 0, text: match[0] }));
 }
 
-function sinkMatches(line: string): Array<{ index: number; text: string; kind: string }> {
+function sinkMatches(line: string, includeHtmlOutput = true): Array<{ index: number; text: string; kind: string }> {
   const matches: Array<{ index: number; text: string; kind: string }> = [];
   for (const candidate of sinkPatterns) {
+    if (!includeHtmlOutput && candidate.kind === "HTML_OUTPUT") continue;
     candidate.pattern.lastIndex = 0;
     for (const match of line.matchAll(candidate.pattern)) matches.push({ index: match.index ?? 0, text: match[0], kind: candidate.kind });
   }
@@ -261,6 +262,7 @@ function buildPythonFile(state: FragmentState, file: FileFingerprint, content: s
   const rawLines = content.split(/\r?\n/);
   const lines = maskPython(content).split(/\r?\n/);
   const functions = findFunctions(normalizedFile, lines);
+  const webContext = /\b(?:flask|django|fastapi|starlette|bottle|render_template|request)\b/i.test(content);
   for (const fn of functions) {
     addNode(state, normalizedFile, fn.line, fn.indent + 1, "FUNCTION", fn.name, "Python function scope used for bounded source-to-sink analysis.", rawLines[fn.line - 1] ?? "");
     addEdge(state, { from: fileNodeId(normalizedFile), to: fn.nodeId, kind: "CONTAINS", confidence: "HIGH" });
@@ -337,7 +339,7 @@ function buildPythonFile(state: FragmentState, file: FileFingerprint, content: s
 
       if (!masked.trim()) continue;
 
-      for (const sink of sinkMatches(masked)) {
+      for (const sink of sinkMatches(masked, webContext)) {
         const callNodeId = addNode(state, normalizedFile, lineIndex + 1, sink.index + 1, "CALL", sink.text.replace(/\s*\($/, ""), "Python call expression discovered by the source-to-sink graph.", raw);
         addEdge(state, { from: currentFunction?.nodeId ?? fileNodeId(normalizedFile), to: callNodeId, kind: "CALLS", confidence: "MEDIUM", label: sink.text });
         const sinkNodeId = addNode(state, normalizedFile, lineIndex + 1, sink.index + 1, "SINK", sink.text.replace(/\s*\($/, ""), sinkRuleKind(sink.kind), raw);
