@@ -111,16 +111,16 @@ independent runtime validator was supplied.
 
 The reproducible optimized run is [RealVuln v2 optimized aggregate](../benchmark/results/realvuln-v2-aggregate-optimized-20260801.json).
 It uses the same 62 completed repositories, four explicit blocked entries, and
-the same one-to-one scorer, but the `a6cf9c8` scanner revision adds Python
+the same one-to-one scorer, but the `ccc8696` scanner revision adds Python
 property/taint semantics, framework-aware policy evidence, GraphQL mutation
-ownership tracing, template unsafe-output checks, session-integrity
+ownership tracing, request-mapping mass-assignment tracing, template unsafe-output checks, session-integrity
 separation, generated-asset filtering, parameterized-query recognition,
-Graphene/Tornado auth-surface coverage, and gap analysis. It produced 703
-candidates: precision `0.797`, recall `0.318`, FPR `0.366`, and F3 `0.338`.
+Graphene/Tornado auth-surface coverage, and gap analysis. It produced 734
+candidates: precision `0.805`, recall `0.335`, FPR `0.366`, and F3 `0.356`.
 The run used no model or runtime validator, so reportable recall remains `0` by
 policy. Relative to the checked-in baseline, true positives increased from
-307 to 560 and false positives decreased from 355 to 143; the candidate count
-changed from 662 to 703. These are observed improvements over the checked-in
+307 to 591 and false positives decreased from 355 to 143; the candidate count
+changed from 662 to 734. These are observed improvements over the checked-in
 baseline, not a claim of superiority over OpenAI, Cloudflare, or research
 baselines.
 
@@ -130,8 +130,8 @@ language-specific weakness:
 | Framework | Repositories | Labels | Precision | Recall | FPR | F3 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Flask | 12 | 341 | 0.740 | 0.380 | 0.453 | 0.400 |
-| Django | 22 | 761 | 0.807 | 0.411 | 0.431 | 0.433 |
-| FastAPI | 23 | 707 | 0.808 | 0.230 | 0.296 | 0.247 |
+| Django | 22 | 761 | 0.815 | 0.434 | 0.431 | 0.455 |
+| FastAPI | 23 | 707 | 0.824 | 0.255 | 0.296 | 0.274 |
 | Tornado | 1 | 17 | 1.000 | 0.786 | 0.000 | 0.803 |
 | Other Python / aiohttp | 4 | 192 | 0.826 | 0.117 | 0.118 | 0.128 |
 
