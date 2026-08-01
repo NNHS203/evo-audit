@@ -897,6 +897,23 @@ test("Python graph tracks local assignments and helper summaries without flaggin
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-OPEN-REDIRECT-001" && finding.locations.some((location) => location.file === "safe.py")), false);
 });
 
+test("generated vendor assets are skipped without hiding ordinary static application code", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-generated-assets-"));
+  await initWorkspace(root);
+  const commandFlow = [
+    "import { exec } from 'node:child_process';",
+    "export function run(req) {",
+    "  exec(req.body.command);",
+    "}",
+  ].join("\n");
+  await mkdir(path.join(root, "static", "jquery"), { recursive: true });
+  await writeFile(path.join(root, "static", "jquery", "jquery.min.js"), commandFlow, "utf8");
+  await writeFile(path.join(root, "static", "app.js"), commandFlow, "utf8");
+  const result = await runAudit(root, { output: path.join(root, "runs") });
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "JS-COMMAND-INJECTION-001" && finding.locations.some((location) => location.file.includes("jquery.min.js"))), false);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "JS-COMMAND-INJECTION-001" && finding.locations.some((location) => location.file === "static/app.js")), true);
+});
+
 test("Python graph keeps bound SQL parameters and browser clients out of server-side injection findings", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-safe-boundary-"));
   await initWorkspace(root);
