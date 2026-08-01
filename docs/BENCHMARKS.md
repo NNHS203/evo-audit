@@ -114,11 +114,12 @@ It uses the same 62 completed repositories, four explicit blocked entries, and
 the same one-to-one scorer, but the `298a812` scanner revision adds Python
 property/taint semantics, framework-aware policy evidence, template unsafe
 output checks, session-integrity separation, generated-asset filtering,
-parameterized-query recognition, and gap analysis. It produced 697 candidates:
-precision `0.796`, recall `0.315`, FPR `0.364`, and F3 `0.335`.
+parameterized-query recognition, Graphene/Tornado auth-surface coverage, and
+gap analysis. It produced 700 candidates: precision `0.796`, recall `0.316`,
+FPR `0.366`, and F3 `0.336`.
 The run used no model or runtime validator, so reportable recall remains `0` by
 policy. This is a precision-focused revision relative to the previous
-candidate-only run: it removes 109 candidates and 104 unmatched candidates
+candidate-only run: it removes 106 candidates and 103 unmatched candidates
 while retaining nearly the same recall. These are observed improvements over
 the checked-in baseline, not a claim of superiority over OpenAI, Cloudflare,
 or research baselines.
@@ -128,10 +129,10 @@ language-specific weakness:
 
 | Framework | Repositories | Labels | Precision | Recall | FPR | F3 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Flask | 12 | 341 | 0.728 | 0.366 | 0.460 | 0.386 |
+| Flask | 12 | 341 | 0.735 | 0.370 | 0.453 | 0.389 |
 | Django | 22 | 761 | 0.807 | 0.411 | 0.431 | 0.433 |
 | FastAPI | 23 | 707 | 0.808 | 0.230 | 0.296 | 0.247 |
-| Tornado | 1 | 17 | 1.000 | 0.714 | 0.000 | 0.735 |
+| Tornado | 1 | 17 | 1.000 | 0.786 | 0.000 | 0.803 |
 | Other Python / aiohttp | 4 | 192 | 0.826 | 0.117 | 0.118 | 0.128 |
 
 Use `scripts/realvuln-gaps.mjs` to reproduce the top false-negative classes or
