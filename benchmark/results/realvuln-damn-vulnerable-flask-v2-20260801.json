@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "status": "OBSERVED_BASELINE",
+  "benchmark": "RealVuln",
+  "benchmarkVersion": "2.0.0",
+  "benchmarkRepositoryRevision": "98872da5caa25eb4d4bc7d5b93e10e08148a2049",
+  "repository": {
+    "id": "realvuln-damn-vulnerable-flask-application",
+    "commit": "55f63201c85190e760a8fa34a580a9bf918dbf36",
+    "language": "python",
+    "framework": "flask"
+  },
+  "groundTruth": {
+    "labels": 19,
+    "vulnerableLabels": 15,
+    "safeLabels": 4,
+    "sha256": "800602b47d2ac838a212212c9db7b7e284c2a58df27dd1b7a099d26f1db31468"
+  },
+  "auditedTreeDigest": "9ff406823a9329f8dc4bfc2a35abd88d99bf2b7b71d5e0a4995b89840b3d5bac",
+  "scoring": {
+    "lineTolerance": 10,
+    "reportableRequiresIndependentValidator": true
+  },
+  "scanners": {
+    "evo-audit": {
+      "commit": "1c84eab",
+      "findings": 5,
+      "candidate": {
+        "truePositive": 5,
+        "falsePositive": 0,
+        "falseNegative": 10,
+        "trueNegative": 4,
+        "precision": 1,
+        "recall": 0.3333333333,
+        "falsePositiveRate": 0,
+        "f3": 0.3571428571
+      },
+      "reportable": {
+        "truePositive": 0,
+        "falsePositive": 0,
+        "falseNegative": 15,
+        "recall": 0
+      }
+    },
+    "bandit": {
+      "version": "1.9.4",
+      "command": "python -m bandit -r <checkout> -f json -o bandit.json",
+      "findings": 5,
+      "candidate": {
+        "truePositive": 1,
+        "falsePositive": 4,
+        "falseNegative": 14,
+        "trueNegative": 4,
+        "precision": 0.2,
+        "recall": 0.0666666667,
+        "falsePositiveRate": 0.5,
+        "f3": 0.0714285714
+      },
+      "reportable": {
+        "truePositive": 0,
+        "falsePositive": 0,
+        "falseNegative": 15,
+        "recall": 0
+      }
+    }
+  },
+  "notes": [
+    "This is a pinned observed baseline, not a benchmark-wide claim or a CI acceptance threshold.",
+    "Neither scanner had independent runtime validation for this run; reportable recall is therefore zero by policy.",
+    "Re-run the adapter and scorer after changing code, benchmark revision, or scanner version before comparing numbers."
+  ]
+}

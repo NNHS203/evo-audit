@@ -49,6 +49,14 @@ that one repository is a benchmark-wide score; use the same command for each
 selected pinned repository and aggregate only after fixing the benchmark
 version and execution policy.
 
+One pinned observed snapshot is checked in at
+[`benchmark/results/realvuln-damn-vulnerable-flask-v2-20260801.json`](../benchmark/results/realvuln-damn-vulnerable-flask-v2-20260801.json).
+It is deliberately marked `OBSERVED_BASELINE`, not a CI gate: on the same
+15-vulnerability/4-trap Flask checkout, Evo Audit measured candidate
+precision 1.000, recall 0.333, FPR 0, F3 0.357; Bandit 1.9.4 measured precision
+0.200, recall 0.067, FPR 0.500, F3 0.071. Neither result counts as reportable
+without independent validation.
+
 For a local pinned checkout, a case can use a source reference instead of
 embedding code:
 
