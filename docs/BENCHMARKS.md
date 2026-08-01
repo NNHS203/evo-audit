@@ -89,12 +89,44 @@ The first full-manifest run is checked in separately as an observed corpus
 baseline: [RealVuln v2 aggregate](../benchmark/results/realvuln-v2-aggregate-20260801.json).
 It completed 62/66 manifest entries and blocked four entries whose published
 GitHub URLs were no longer available. Across the 2,018 labels in completed
-repositories, candidate precision was `0.464`, candidate recall `0.174`, FPR
-`0.592`, and F3 `0.186`; reportable recall was `0.000` because no independent
-runtime validator was supplied. This is the honest current corpus result,
-not a claim of superiority over OpenAI, Cloudflare, or research baselines.
-The gap makes framework coverage, candidate ranking, and independent
-model-backed/runtime validation the next optimization targets.
+repositories, that baseline had candidate precision `0.464`, candidate recall
+`0.174`, FPR `0.592`, and F3 `0.186`; reportable recall was `0.000` because no
+independent runtime validator was supplied.
+
+The reproducible optimized run is [RealVuln v2 optimized aggregate](../benchmark/results/realvuln-v2-aggregate-optimized-20260801.json).
+It uses the same 62 completed repositories, four explicit blocked entries, and
+the same one-to-one scorer, but the `73bb42f` scanner revision adds Python
+property/taint semantics, framework-aware policy evidence, template unsafe
+output checks, session-integrity separation, and gap analysis. It produced
+806 candidates: precision `0.695`, recall `0.318`, FPR `0.501`, and F3 `0.336`.
+The run used no model or runtime validator, so reportable recall remains `0` by
+policy. These are observed improvements over the checked-in baseline, not a
+claim of superiority over OpenAI, Cloudflare, or research baselines.
+
+The optimized framework breakdown is retained so aggregate wins cannot hide a
+language-specific weakness:
+
+| Framework | Repositories | Labels | Precision | Recall | FPR | F3 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Flask | 12 | 341 | 0.519 | 0.384 | 0.703 | 0.394 |
+| Django | 22 | 761 | 0.805 | 0.411 | 0.435 | 0.432 |
+| FastAPI | 23 | 707 | 0.694 | 0.230 | 0.438 | 0.246 |
+| Tornado | 1 | 17 | 1.000 | 0.714 | 0.000 | 0.735 |
+| Other Python / aiohttp | 4 | 192 | 0.613 | 0.117 | 0.286 | 0.128 |
+
+Use `scripts/realvuln-gaps.mjs` to reproduce the top false-negative classes or
+inspect a specific rule without importing temporary checkout paths into a
+public result:
+
+```bash
+node scripts/realvuln-gaps.mjs \
+  ./realvuln-runs/realvuln-aggregate.json PY-USER-ENUMERATION-001
+```
+
+The next acceptance target is independent positive/negative runtime validation
+for the same findings, followed by broader JavaScript/TypeScript and framework
+holdouts. Candidate recall must not be promoted to reportable recall merely by
+adding a larger model.
 
 The checked-in records include the full upstream commit, ground-truth hash,
 audited tree digest, line tolerance, scanner commit, and the separate

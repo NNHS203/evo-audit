@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "status": "OBSERVED_HOLDOUT",
+  "benchmark": "RealVuln",
+  "benchmarkVersion": "2.0.0",
+  "groundTruthVersion": "2.0.0",
+  "benchmarkRepositoryRevision": "98872da5caa25eb4d4bc7d5b93e10e08148a2049",
+  "scanner": "evo-audit",
+  "scannerCommit": "73bb42f029b3f9985111ad67cf2496280200a44b",
+  "execution": {
+    "manifestRepositories": 66,
+    "completedRepositories": 62,
+    "blockedRepositories": 4,
+    "independentValidator": false,
+    "runtimeValidation": "NOT_RUN",
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "durationMs": 0
+  },
+  "aggregate": {
+    "labels": 2018,
+    "vulnerableLabels": 1762,
+    "safeLabels": 256,
+    "findings": 806,
+    "unsupportedClaimCount": 0,
+    "unsupportedClaimRate": 0,
+    "candidate": {
+      "truePositive": 560,
+      "falsePositive": 246,
+      "falseNegative": 1202,
+      "trueNegative": 245,
+      "candidateCount": 806,
+      "validatedCount": 0,
+      "precision": 0.6947890818858561,
+      "recall": 0.3178206583427923,
+      "falsePositiveRate": 0.5010183299389002,
+      "f3": 0.3360537686029765,
+      "tokensPerValidatedFinding": null
+    },
+    "reportable": {
+      "truePositive": 0,
+      "falsePositive": 0,
+      "falseNegative": 1762,
+      "trueNegative": 256,
+      "candidateCount": 0,
+      "validatedCount": 0,
+      "precision": 0,
+      "recall": 0,
+      "falsePositiveRate": 0,
+      "f3": 0,
+      "tokensPerValidatedFinding": null
+    }
+  },
+  "frameworkSummary": {
+    "flask": { "repositories": 12, "labels": 341, "findings": 216, "precision": 0.5185185185185185, "recall": 0.3835616438356164, "falsePositiveRate": 0.7027027027027027, "f3": 0.3938115330520394 },
+    "django": { "repositories": 22, "labels": 761, "findings": 343, "precision": 0.8046647230320699, "recall": 0.4113263785394933, "falsePositiveRate": 0.43506493506493504, "f3": 0.4324663115010969 },
+    "python": { "repositories": 3, "labels": 165, "findings": 26, "precision": 0.5769230769230769, "recall": 0.1079136690647482, "falsePositiveRate": 0.2972972972972973, "f3": 0.11746280344557555 },
+    "aiohttp": { "repositories": 1, "labels": 27, "findings": 5, "precision": 0.8, "recall": 0.17391304347826086, "falsePositiveRate": 0.2, "f3": 0.18867924528301885 },
+    "fastapi": { "repositories": 23, "labels": 707, "findings": 206, "precision": 0.6941747572815534, "recall": 0.22953451043338685, "falsePositiveRate": 0.4375, "f3": 0.24600034405642526 },
+    "tornado": { "repositories": 1, "labels": 17, "findings": 10, "precision": 1, "recall": 0.7142857142857143, "falsePositiveRate": 0, "f3": 0.7352941176470589 }
+  },
+  "comparisonToCheckedInBaseline": {
+    "baseline": "benchmark/results/realvuln-v2-aggregate-20260801.json",
+    "candidatePrecision": { "baseline": 0.4637462235649547, "optimized": 0.6947890818858561, "delta": 0.2310428583209014 },
+    "candidateRecall": { "baseline": 0.17423382519863792, "optimized": 0.3178206583427923, "delta": 0.1435868331441544 },
+    "falsePositiveRate": { "baseline": 0.5916666666666667, "optimized": 0.5010183299389002, "delta": -0.0906483367277665 },
+    "f3": { "baseline": 0.1858353510895884, "optimized": 0.3360537686029765, "delta": 0.1502184175133881 }
+  },
+  "blockedRepositories": [
+    { "id": "realvuln-owasp-web-playground", "url": "https://github.com/yourrepo/OWASP-Web-Playground", "commit": "5e682aca1b58e03362a5fbd9fc88c37626e429ce", "reason": "PUBLISHED_URL_UNAVAILABLE" },
+    { "id": "realvuln-pygoat", "url": "https://github.com/OWASP/PyGoat", "commit": "2fb0c600245f50670e8b9233c784afe61e8b340b", "reason": "PUBLISHED_URL_UNAVAILABLE" },
+    { "id": "realvuln-python-app", "url": "https://github.com/RiieCco/owasp-bay-area", "commit": "a33452268ef7489ebeb44f65a1bae06eda2072ab", "reason": "PUBLISHED_URL_UNAVAILABLE" },
+    { "id": "realvuln-vulnerable-api", "url": "https://github.com/kolega-ai/realvuln-Vulnerable-API", "commit": "f7797964e1cd63a1cbcc8ced721fa41db674c8e0", "reason": "PUBLISHED_URL_UNAVAILABLE" }
+  ],
+  "notes": [
+    "This is an observed full-manifest holdout, not a CI acceptance gate or a frontier-wide superiority claim.",
+    "Blocked entries are excluded from score denominators and are not treated as safe.",
+    "The deterministic audit produced zero model tokens; model-backed investigation was not run in this aggregate.",
+    "Reportable findings require independent validation, so reportable recall is zero in this run by policy.",
+    "The optimized commit adds Python property/taint semantics, framework-aware policy evidence, template unsafe-output evidence, session-integrity separation, and deterministic gap analysis."
+  ]
+}
