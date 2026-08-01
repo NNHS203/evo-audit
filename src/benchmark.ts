@@ -231,6 +231,11 @@ async function runCase(item: BenchmarkCase, casesDirectory: string, options: Ben
   try {
     const sourceRevision = await materializeCase(root, item, casesDirectory);
     await initWorkspace(root);
+    if (options.validate && process.platform !== "win32") {
+      // mkdtemp creates a 0700 root. The validator remains non-root, so expose
+      // only this app-owned temporary snapshot to the read-only container.
+      await fs.chmod(root, 0o755);
+    }
     const startedAt = Date.now();
     const initial = await runAudit(root, { output: path.join(root, "runs") });
     let run = initial.run;
