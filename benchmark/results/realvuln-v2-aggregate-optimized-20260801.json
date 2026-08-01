@@ -6,7 +6,7 @@
   "groundTruthVersion": "2.0.0",
   "benchmarkRepositoryRevision": "98872da5caa25eb4d4bc7d5b93e10e08148a2049",
   "scanner": "evo-audit",
-  "scannerCommit": "75e9271c71f527bd0dc21936e9f12a69249c6389",
+  "scannerCommit": "b64d773613754aca02aaae21242fcbdff76aab4d",
   "execution": {
     "manifestRepositories": 66,
     "completedRepositories": 62,
