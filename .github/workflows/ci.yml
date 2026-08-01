@@ -23,5 +23,6 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run benchmark:ci
+      - run: npm run benchmark:framework-ci
       - run: npm run benchmark:validator-ci
         if: matrix.node-version == '24.x'
