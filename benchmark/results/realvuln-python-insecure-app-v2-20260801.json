@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "status": "OBSERVED_HOLDOUT",
+  "benchmark": "RealVuln",
+  "benchmarkVersion": "2.0.0",
+  "benchmarkRepositoryRevision": "98872da5caa25eb4d4bc7d5b93e10e08148a2049",
+  "repository": {
+    "id": "realvuln-python-insecure-app",
+    "commit": "80b894a2f754590747a31c92b2088be086421953",
+    "language": "python",
+    "framework": "fastapi"
+  },
+  "groundTruth": {
+    "labels": 10,
+    "vulnerableLabels": 8,
+    "safeLabels": 2,
+    "sha256": "ea53fa2979e8ab735124a84bb13e7c1183ce7f77af57e0d2dede796d16f85c1e"
+  },
+  "auditedTreeDigest": "752bc9ef5f8ccaeb55d4be62f6ccf4d8e41ee0cdd66d0dd25bf39f0142895ffa",
+  "scoring": {
+    "lineTolerance": 10,
+    "reportableRequiresIndependentValidator": true
+  },
+  "scanners": {
+    "evo-audit": {
+      "commit": "e9dfaf6",
+      "findings": 8,
+      "candidate": {
+        "truePositive": 8,
+        "falsePositive": 0,
+        "falseNegative": 0,
+        "trueNegative": 2,
+        "precision": 1,
+        "recall": 1,
+        "falsePositiveRate": 0,
+        "f3": 1
+      },
+      "reportable": {
+        "truePositive": 0,
+        "falsePositive": 0,
+        "falseNegative": 8,
+        "recall": 0
+      }
+    }
+  },
+  "notes": [
+    "This is a pinned observed holdout, not a benchmark-wide claim or a CI acceptance threshold.",
+    "The result exercises FastAPI configuration, route-parameter, raw-template, reflected-output, and security-property detectors.",
+    "No independent runtime validator was run for this holdout; reportable recall is therefore zero by policy."
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "status": "OBSERVED_COVERAGE_GAP",
+  "benchmark": "RealVuln",
+  "benchmarkVersion": "2.0.0",
+  "benchmarkRepositoryRevision": "98872da5caa25eb4d4bc7d5b93e10e08148a2049",
+  "repository": {
+    "id": "realvuln-djangoat",
+    "commit": "082c88bfefced508ae083b92b459c808f95e905e",
+    "language": "python",
+    "framework": "django"
+  },
+  "groundTruth": {
+    "labels": 58,
+    "vulnerableLabels": 52,
+    "safeLabels": 6,
+    "sha256": "087603505c58027fcade006420389abcc7abd162835a4745ec45ea043d4e4ab4"
+  },
+  "auditedTreeDigest": "6615a6d56ceca8f1df6b0cb84c3360742096fd2f0b5e8836239ef956c0182482",
+  "scoring": {
+    "lineTolerance": 10,
+    "reportableRequiresIndependentValidator": true
+  },
+  "scanners": {
+    "evo-audit": {
+      "commit": "e9dfaf6",
+      "findings": 26,
+      "candidate": {
+        "truePositive": 25,
+        "falsePositive": 1,
+        "falseNegative": 27,
+        "trueNegative": 6,
+        "precision": 0.9615384615,
+        "recall": 0.4807692308,
+        "falsePositiveRate": 0.1428571429,
+        "f3": 0.5060728745
+      },
+      "reportable": {
+        "truePositive": 0,
+        "falsePositive": 0,
+        "falseNegative": 52,
+        "recall": 0
+      }
+    }
+  },
+  "notes": [
+    "This row is retained as an explicit coverage-gap observation, not a release threshold.",
+    "The single candidate false positive is the pay-record IDOR whose published label describes the sink at the actual line 72 but records line 44; the scorer preserves the published location rather than silently changing ground truth.",
+    "No independent runtime validator was run for this holdout; reportable recall is therefore zero by policy."
+  ]
+}

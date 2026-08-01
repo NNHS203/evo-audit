@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "status": "OBSERVED_COVERAGE_GAP",
+  "benchmark": "RealVuln",
+  "benchmarkVersion": "2.0.0",
+  "benchmarkRepositoryRevision": "98872da5caa25eb4d4bc7d5b93e10e08148a2049",
+  "repository": {
+    "id": "realvuln-vulnerable-tornado-app",
+    "commit": "7aca8b78ba948c841d6cb1cc2a244922a27e842b",
+    "language": "python",
+    "framework": "tornado"
+  },
+  "groundTruth": {
+    "labels": 17,
+    "vulnerableLabels": 14,
+    "safeLabels": 3,
+    "sha256": "0887eb4ebc2db680523a2ea6d29054b6f5d32687f4c62236df8b6020992994ee"
+  },
+  "auditedTreeDigest": "4ec4ee6a187967324e80d5d09444583f67f4f55e60f224111c8128ea7f375d20",
+  "scoring": {
+    "lineTolerance": 10,
+    "reportableRequiresIndependentValidator": true
+  },
+  "scanners": {
+    "evo-audit": {
+      "commit": "e9dfaf6",
+      "findings": 8,
+      "candidate": {
+        "truePositive": 8,
+        "falsePositive": 0,
+        "falseNegative": 6,
+        "trueNegative": 3,
+        "precision": 1,
+        "recall": 0.5714285714,
+        "falsePositiveRate": 0,
+        "f3": 0.5970149254
+      },
+      "reportable": {
+        "truePositive": 0,
+        "falsePositive": 0,
+        "falseNegative": 14,
+        "recall": 0
+      }
+    }
+  },
+  "notes": [
+    "This row is retained as an explicit framework-coverage observation, not a release threshold.",
+    "The improvement came from Tornado RequestHandler/get_argument boundary modeling, bounded multiline call context, write-vs-read file semantics, raw-template signal handling, and same-source path-sink deduplication.",
+    "No independent runtime validator was run for this holdout; reportable recall is therefore zero by policy."
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "status": "OBSERVED_HOLDOUT",
+  "benchmark": "RealVuln",
+  "benchmarkVersion": "2.0.0",
+  "benchmarkRepositoryRevision": "98872da5caa25eb4d4bc7d5b93e10e08148a2049",
+  "repository": {
+    "id": "realvuln-vfapi",
+    "commit": "f36f177e1a32aa49272f4eb52f8be0af3e8f6bc3",
+    "language": "python",
+    "framework": "fastapi"
+  },
+  "groundTruth": {
+    "labels": 11,
+    "vulnerableLabels": 9,
+    "safeLabels": 2,
+    "sha256": "c5d9f1d4f43bc78d0ded44f2e7e777d33306f532688e38d1508c85038e219261"
+  },
+  "auditedTreeDigest": "1a0a5a0a3bafd0d7013bb95c7a4de53fb680e026d99a18df84bf84cfbdbb656a",
+  "scoring": {
+    "lineTolerance": 10,
+    "reportableRequiresIndependentValidator": true
+  },
+  "scanners": {
+    "evo-audit": {
+      "commit": "e9dfaf6",
+      "findings": 9,
+      "candidate": {
+        "truePositive": 9,
+        "falsePositive": 0,
+        "falseNegative": 0,
+        "trueNegative": 2,
+        "precision": 1,
+        "recall": 1,
+        "falsePositiveRate": 0,
+        "f3": 1
+      },
+      "reportable": {
+        "truePositive": 0,
+        "falsePositive": 0,
+        "falseNegative": 9,
+        "recall": 0
+      }
+    }
+  },
+  "notes": [
+    "This is a pinned observed holdout, not a benchmark-wide claim or a CI acceptance threshold.",
+    "The result exercises FastAPI route-parameter modeling, scalar-versus-structured NoSQL semantics, SQL helper flow, missing-auth policy, and sensitive-data rules.",
+    "No independent runtime validator was run for this holdout; reportable recall is therefore zero by policy."
+  ]
+}

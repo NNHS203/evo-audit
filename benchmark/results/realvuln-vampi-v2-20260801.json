@@ -23,7 +23,7 @@
   },
   "scanners": {
     "evo-audit": {
-      "commit": "03f2b0b",
+      "commit": "e9dfaf6",
       "findings": 15,
       "candidate": {
         "truePositive": 15,
@@ -45,6 +45,7 @@
   },
   "notes": [
     "This is a pinned observed holdout, not a CI acceptance threshold or a benchmark-wide claim.",
+    "The e9dfaf6 run preserves the perfect candidate result after the framework-aware Python graph and scoring changes.",
     "The target was not used for the development-case rules; it exercises Python API property detectors across SQLi, IDOR/BOLA, mass assignment, sensitive data, user enumeration, ReDoS, secrets, debug mode, missing authentication, cleartext passwords, and rate-limit gaps.",
     "No independent runtime validator was run for this holdout; reportable recall is therefore zero by policy.",
     "One separate manifest entry, realvuln-vulnerable-api, was not runnable because its published GitHub URL returned repository-not-found; that external availability failure was not scored as a security result."
