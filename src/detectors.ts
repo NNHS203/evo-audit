@@ -583,7 +583,7 @@ function pythonRateLimitLines(relativePath: string, content: string, playbook: A
     const authName = /\b(?:do_login|do_signup|login|signin|sign_in|register|signup|sign_up|reset_password|forgot_password|change_password|verify_email|verify_token|password_reset|request_password_reset|confirm_password_reset)\b/i.test(block.name);
     const authRouteName = /(?:^|\/)\s*(?:login|signin|sign-in|register|signup|sign-up|auth|token|password|reset|verify|mfa|otp)\b/i.test(routeOrName);
     const requestInput = /\b(?:request|req)\s*\.\s*(?:POST|form|json|body|values|data|args|query_params)\b|\bself\s*\.\s*request\s*\.\s*(?:arguments|body|files|query|uri)\b|\bself\s*\.\s*get_argument\s*\(/i.test(block.body);
-    const credentialInput = /\b(?:password|passwd|passphrase|username|email|otp|mfa|credential|api[_-]?key)\b/i.test(block.body);
+    const credentialInput = /\b(?:password|passwd|passphrase|pwd|username|uname|email|otp|mfa|credential|api[_-]?key)\b/i.test(block.body);
     const postLike = /\b(?:request|req)\s*\.\s*(?:POST|form|json|body|values|data)\b|\bself\s*\.\s*(?:request\s*\.\s*)?get_argument\s*\(|\b(?:methods|method)\s*=\s*[^\n]*(?:POST|post)/i.test(block.body)
       || /\b(?:methods|method)\s*=\s*[^\n]*(?:POST|post)/i.test(block.decorators);
     const authOperation = /\b(?:authenticate|check_password|check_password_hash|verify_password|login_user|authenticate_user)\s*\(/i.test(block.body);
@@ -605,7 +605,10 @@ function pythonRateLimitLines(relativePath: string, content: string, playbook: A
     if (!authFlow && !routeAuthFlow && !graphqlMutationAuthFlow && !requestHandlerAuthFlow) continue;
     if (moduleHasLimiter && /\b(?:limiter|rate_limit|throttle|lockout|backoff|failed_attempt|sleep\s*\()\b/i.test(block.body)) continue;
     if (/\b(?:limiter|rate_limit|throttle|lockout|backoff|failed_attempt|sleep\s*\()\b/i.test(block.body)) continue;
-    result.set(block.routeLine, [rule.id]);
+    const handlerRouteOffset = requestHandlerAuthFlow
+      ? block.body.split(/\r?\n/).findIndex((line) => /\bpath\s*==\s*['"][^'"]*login[^'"]*['"]|['"]\/login(?:['"]|\/)/i.test(line))
+      : -1;
+    result.set(handlerRouteOffset >= 0 ? block.startLine + handlerRouteOffset : block.routeLine, [rule.id]);
   }
   return result;
 }
