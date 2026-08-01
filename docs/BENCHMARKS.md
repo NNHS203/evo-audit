@@ -49,24 +49,33 @@ that one repository is a benchmark-wide score; use the same command for each
 selected pinned repository and aggregate only after fixing the benchmark
 version and execution policy.
 
-One pinned observed snapshot is checked in at
-[`benchmark/results/realvuln-damn-vulnerable-flask-v2-20260801.json`](../benchmark/results/realvuln-damn-vulnerable-flask-v2-20260801.json).
-It is deliberately marked `OBSERVED_BASELINE`, not a CI gate: on the same
-15-vulnerability/4-trap Flask checkout, Evo Audit commit `03f2b0b` measured
-candidate precision 1.000, recall 1.000, FPR 0, F3 1.000 after adding
-property-flow coverage and primary-CWE-aware matching; Bandit 1.9.4 measured precision
-0.200, recall 0.067, FPR 0.500, F3 0.071. Neither result counts as reportable
-without independent validation. This is one pinned Python target, not a
-benchmark-wide or frontier-wide superiority claim; more repositories and
-independent validators are required before generalizing it.
+The checked-in pinned observations are deliberately marked `OBSERVED_HOLDOUT`,
+not CI gates. They are candidate-discovery measurements; without an independent
+runtime validator their reportable recall is zero by policy.
 
-A separate pinned holdout, VAmPI (`realvuln-vampi`), is recorded at
-[`benchmark/results/realvuln-vampi-v2-20260801.json`](../benchmark/results/realvuln-vampi-v2-20260801.json).
-Commit `03f2b0b` measured 15/15 vulnerable labels, 0/4 false-positive traps,
-precision 1.000, recall 1.000, and F3 1.000. This is still an observed
-two-repository Python result, not a general claim about all repositories or
-models. One other manifest URL returned repository-not-found and was excluded
-from scoring rather than silently treated as a miss.
+| Repository | Framework | Vulnerable / safe labels | Candidate precision | Candidate recall | FPR | F3 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| [Damn Vulnerable Flask](../benchmark/results/realvuln-damn-vulnerable-flask-v2-20260801.json) | Flask | 15 / 4 | 1.000 | 1.000 | 0.000 | 1.000 |
+| [VAmPI](../benchmark/results/realvuln-vampi-v2-20260801.json) | Flask | 15 / 4 | 1.000 | 1.000 | 0.000 | 1.000 |
+| [VFAPI](../benchmark/results/realvuln-vfapi-v2-20260801.json) | FastAPI | 9 / 2 | 1.000 | 1.000 | 0.000 | 1.000 |
+| [Python insecure app](../benchmark/results/realvuln-python-insecure-app-v2-20260801.json) | FastAPI | 8 / 2 | 1.000 | 1.000 | 0.000 | 1.000 |
+| [DjanGoat](../benchmark/results/realvuln-djangoat-v2-20260801.json) | Django | 52 / 6 | 0.962 | 0.481 | 0.143 | 0.506 |
+| [Vulnerable Tornado App](../benchmark/results/realvuln-vulnerable-tornado-app-v2-20260801.json) | Tornado | 14 / 3 | 1.000 | 0.571 | 0.000 | 0.597 |
+
+The four perfect results are four pinned repositories, not a benchmark-wide
+or frontier-wide superiority claim. The Django and Tornado rows are retained
+as coverage evidence rather than hidden: they show that framework semantics,
+template resolution, and access-control policies remain the main recall gap.
+The Tornado run improved from 1/14 with one false positive to 8/14 with zero
+false positives after adding `get_argument`/RequestHandler sources, bounded
+multiline call context, write-vs-read file semantics, and same-source sink
+deduplication. DjanGoat's remaining single false positive is a published
+ground-truth location mismatch for the pay-record deletion described at the
+actual sink line; it is preserved in the score rather than silently corrected.
+
+The checked-in records include the full upstream commit, ground-truth hash,
+audited tree digest, line tolerance, scanner commit, and the separate
+evidence-gated channel. Re-run the adapter after changing any of those inputs.
 
 For a local pinned checkout, a case can use a source reference instead of
 embedding code:
@@ -122,6 +131,25 @@ npm run benchmark:validator-ci
 
 It runs the `validator` split in Docker/Podman and requires
 `reportableRecall=1`; discovery recall cannot satisfy that gate.
+
+## Repair-regression track
+
+The revalidation suite is a release gate, not a disappearance counter. The
+checked-in test `revalidation keeps a disappeared verified finding actionable`
+creates a verified finding, applies a proposed fix, rescans the after snapshot,
+and asserts that the missing root cause becomes `UNKNOWN`/`REVALIDATE` until
+validated semantic coverage is available. The CLI equivalent is:
+
+```bash
+evo-audit revalidate ./before/run.json ./after/run.json \
+  --output ./after/revalidation.json
+```
+
+The plan also marks a still-`VERIFIED` root cause as `BLOCKING_REGRESSION` and
+keeps new findings as `VALIDATE_NEW`. This prevents a patch from “passing” by
+silencing the detector, changing the snapshot, or exploiting incomplete
+coverage. Future benchmark releases can aggregate this same lifecycle over a
+larger patch corpus as `revalidation survival` and `blocking regression rate`.
 
 This protocol is the basis for a future cross-language adapter; it prevents a
 larger model, looser evidence policy, or unfinished scan from looking like a

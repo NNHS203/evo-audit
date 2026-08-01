@@ -140,9 +140,11 @@ regression.
 ## Current implementation boundary
 
 The repository currently implements the snapshot, recon, AST/data-flow graph
-(including import-aware cross-file helper summaries), coverage matrix, plan,
+(including import-aware cross-file helper summaries), Python property-flow
+semantics for Flask/FastAPI/Django/Tornado patterns, coverage matrix, plan,
 evidence gate, compare, SARIF, resumable state, model provider, container
-validation, benchmark acceptance, and revalidation layers. The next
-safety-critical research layer is broader framework/alias resolution plus a
-held-out model-backed evaluator. Neither recall nor false-negative performance
-should be claimed complete until it has reproducible benchmark results.
+validation, benchmark acceptance, and revalidation layers. The remaining
+safety-critical research layer is broader framework/template resolution plus a
+held-out model-backed evaluator and independent validation across the full
+external corpus. Neither recall nor false-negative performance should be
+claimed complete from the pinned observations alone.

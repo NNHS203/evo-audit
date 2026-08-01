@@ -136,6 +136,13 @@ function isPythonFile(file: string): boolean {
   return file.toLowerCase().endsWith(".py");
 }
 
+function isLikelyGeneratedAsset(file: string): boolean {
+  const normalized = normalizePath(file).toLowerCase();
+  const basename = normalized.slice(normalized.lastIndexOf("/") + 1);
+  return /(?:^|\/)(?:node_modules|vendor|third_party|static\/js|public\/vendor)\//.test(normalized)
+    && /(?:redoc|swagger|jquery|bootstrap|vendor|bundle|\.min\.)/.test(basename);
+}
+
 function position(sourceFile: ts.SourceFile, node: ts.Node): Pick<CodeGraphNode, "line" | "column" | "endLine"> {
   const start = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
   const end = sourceFile.getLineAndCharacterOfPosition(node.getEnd());
@@ -294,7 +301,7 @@ function buildFileGraph(builder: GraphBuilder, files: FileFingerprint[], content
 }
 
 function analyzeFile(builder: GraphBuilder, file: FileFingerprint, content: string): void {
-  if (isPythonFile(file.path)) return;
+  if (isPythonFile(file.path) || isLikelyGeneratedAsset(file.path)) return;
   const sourceFile = ts.createSourceFile(file.path, content, ts.ScriptTarget.Latest, true, scriptKind(file.path));
   const fileNodeId = builder.fileNodes.get(file.path) ?? `file:${stableId([file.path])}`;
   const rootScope: Scope = { functionNodeId: fileNodeId, tainted: new Map(), controls: [] };
@@ -395,7 +402,7 @@ function analyzeInterprocedural(builder: GraphBuilder, files: FileFingerprint[],
   const calls: CallSite[] = [];
   const fileSet = new Set(files.map((file) => file.path));
   for (const file of files) {
-    if (isPythonFile(file.path)) continue;
+    if (isPythonFile(file.path) || isLikelyGeneratedAsset(file.path)) continue;
     const sourceFile = ts.createSourceFile(file.path, contents.get(file.path) ?? "", ts.ScriptTarget.Latest, true, scriptKind(file.path));
     const fileNodeId = builder.fileNodes.get(file.path) ?? `file:${stableId([file.path])}`;
     const imports = importedBindings(sourceFile, file.path, fileSet);
@@ -572,7 +579,7 @@ function locationFor(node: CodeGraphNode): SourceLocation {
 }
 
 function ruleForSink(playbook: AuditPlaybook, kind: string, file: string): PlaybookRule | undefined {
-  const suffix = kind === "DYNAMIC_CODE" ? "DYNAMIC-CODE" : kind === "COMMAND_EXECUTION" ? "COMMAND-INJECTION" : kind === "QUERY_EXECUTION" ? "SQL-INJECTION" : kind === "REDIRECT" ? "OPEN-REDIRECT" : kind === "SSTI" ? "SSTI" : kind === "OUTBOUND_REQUEST" ? "SSRF" : kind === "XML_PARSE" ? "XXE" : kind === "UNSAFE_DESERIALIZATION" ? "UNSAFE-DESERIALIZATION" : kind === "HTML_OUTPUT" ? "REFLECTED-XSS" : kind === "PASSWORD_STORAGE" ? "CLEARTEXT-PASSWORD" : kind === "PATH_FILE" ? "PATH-TRAVERSAL" : undefined;
+  const suffix = kind === "DYNAMIC_CODE" ? "DYNAMIC-CODE" : kind === "COMMAND_EXECUTION" ? "COMMAND-INJECTION" : kind === "QUERY_EXECUTION" ? "SQL-INJECTION" : kind === "NOSQL_QUERY" ? "NOSQL-INJECTION" : kind === "REDIRECT" ? "OPEN-REDIRECT" : kind === "SSTI" ? "SSTI" : kind === "OUTBOUND_REQUEST" ? "SSRF" : kind === "XML_PARSE" ? "XXE" : kind === "UNSAFE_DESERIALIZATION" ? "UNSAFE-DESERIALIZATION" : kind === "HTML_OUTPUT" ? "REFLECTED-XSS" : kind === "PASSWORD_STORAGE" ? "CLEARTEXT-PASSWORD" : kind === "PATH_FILE" ? "PATH-TRAVERSAL" : undefined;
   if (!suffix) return undefined;
   const extension = file.slice(file.lastIndexOf(".")).toLowerCase();
   return playbook.rules.find((rule) => rule.enabled && rule.id.includes(suffix) && rule.globs.some((glob) => glob.endsWith(extension)))
@@ -594,6 +601,11 @@ function findingText(kind: string): Pick<Finding, "rootCause" | "impact" | "reme
     rootCause: "An AST-traced boundary input reaches a query execution sink through a local data-flow path.",
     impact: "An attacker may alter query semantics if the driver does not parameterize the traced value.",
     remediation: "Use parameterized query APIs and add a test proving metacharacters remain data.",
+  };
+  if (kind === "NOSQL_QUERY") return {
+    rootCause: "An AST-traced structured request object reaches a Mongo-like query sink.",
+    impact: "An attacker may add query operators or alter the intended selector if the request object is not schema-validated and operator-filtered.",
+    remediation: "Accept a typed allowlisted input schema, construct query keys server-side, reject operator keys, and add a positive/negative query regression test.",
   };
   if (kind === "SSTI") return {
     rootCause: "An AST-traced boundary input reaches a server-side template rendering sink.",
@@ -653,7 +665,24 @@ export function detectGraphFindings(
     const kind = sink.detail;
     const rule = ruleForSink(playbook, kind, sink.file);
     if (!rule) continue;
-    const duplicate = [...existing, ...findings].some((finding) => finding.ruleId === rule.id && finding.locations.some((location) => location.file === sink.file && location.line === sink.line));
+    const duplicate = [...existing, ...findings].some((finding) => {
+      if (finding.ruleId !== rule.id) return false;
+      const sameSink = finding.locations.some((location) => location.file === sink.file && location.line === sink.line);
+      const sameSource = finding.locations.some((location) => location.file === source.file && location.line === source.line && location.column === source.column);
+      if (!sameSink && !(kind === "PATH_FILE" && sameSource)) return false;
+      // A deterministic line detector already owns the same sink location.
+      // Multiple graph flows may still share that sink. Keep distinct source
+      // flows where they represent distinct query labels, but do not turn one
+      // command execution sink into duplicate findings for each argument.
+      const isGraphFinding = finding.evidence[0]?.type === "TRACE";
+      const localFlow = source.file === sink.file && source.line === sink.line;
+      return !isGraphFinding
+        || kind === "COMMAND_EXECUTION"
+        || (kind === "PATH_FILE" && sameSource)
+        || (localFlow
+          ? finding.locations.some((location) => location.file === sink.file && location.line === sink.line)
+          : finding.locations.some((location) => location.file === source.file && location.line === source.line && location.column === source.column));
+    });
     if (duplicate) continue;
     const text = findingText(kind);
     const obligationId = `${runId}-${rule.id}-graph-${flow.id}`;

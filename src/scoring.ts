@@ -171,6 +171,25 @@ function matchSpecificity(finding: NormalizedScannerFinding, label: GroundTruthL
   return label.ruleIds.some((ruleId) => findingRuleIds.has(ruleId)) ? 1 : -1;
 }
 
+function locationDistance(finding: NormalizedScannerFinding, label: GroundTruthLabel): number {
+  const expectedLocations = [{ file: label.file, startLine: label.startLine, endLine: label.endLine }, ...(label.alternateLocations ?? [])];
+  let best = Number.POSITIVE_INFINITY;
+  for (const expected of expectedLocations) {
+    for (const actual of finding.locations) {
+      if (normalizedFile(actual.file) !== normalizedFile(expected.file)) continue;
+      const expectedStart = Math.max(1, Math.floor(expected.startLine));
+      const expectedEnd = Math.max(expectedStart, Math.floor(expected.endLine ?? expected.startLine));
+      const actualStart = Math.max(1, Math.floor(actual.startLine));
+      const actualEnd = Math.max(actualStart, Math.floor(actual.endLine));
+      const distance = actualStart <= expectedEnd && actualEnd >= expectedStart
+        ? 0
+        : Math.min(Math.abs(actualStart - expectedEnd), Math.abs(expectedStart - actualEnd));
+      best = Math.min(best, distance);
+    }
+  }
+  return best;
+}
+
 function emptyCounts(): ScoreCounts {
   return {
     truePositive: 0,
@@ -206,7 +225,10 @@ function scoreChannel(
   for (const finding of findings) {
     const match = availableLabels
       .filter((candidate) => !matched.has(candidate.index) && matches(finding, candidate.label, lineTolerance))
-      .sort((left, right) => matchSpecificity(finding, right.label) - matchSpecificity(finding, left.label) || Number(right.label.vulnerable) - Number(left.label.vulnerable) || left.index - right.index)[0];
+      .sort((left, right) => matchSpecificity(finding, right.label) - matchSpecificity(finding, left.label)
+        || locationDistance(finding, left.label) - locationDistance(finding, right.label)
+        || Number(right.label.vulnerable) - Number(left.label.vulnerable)
+        || left.index - right.index)[0];
     if (!match) {
       counts.falsePositive += 1;
       continue;
@@ -268,9 +290,11 @@ function firstLocation(finding: Finding): ScannerLocation[] {
 }
 
 function ruleAliases(ruleId: string): string[] {
+  if (ruleId.includes("CONFIG-WAF-DISABLED")) return ["CWE-16"];
   if (ruleId.includes("COMMAND-INJECTION")) return ["CWE-78"];
   if (ruleId.includes("DYNAMIC-CODE")) return ["CWE-95"];
   if (ruleId.includes("SQL-INJECTION")) return ["CWE-89"];
+  if (ruleId.includes("NOSQL-INJECTION")) return ["CWE-943"];
   if (ruleId.includes("OPEN-REDIRECT")) return ["CWE-601"];
   if (ruleId.includes("SSRF")) return ["CWE-918"];
   if (ruleId.includes("SSTI")) return ["CWE-1336"];
@@ -282,13 +306,16 @@ function ruleAliases(ruleId: string): string[] {
   if (ruleId.includes("SENSITIVE-DATA-EXPOSURE")) return ["CWE-200"];
   if (ruleId.includes("ERROR-DISCLOSURE")) return ["CWE-209"];
   if (ruleId.includes("MASS-ASSIGNMENT")) return ["CWE-915"];
-  if (ruleId.includes("IDOR")) return ["CWE-639"];
+  if (ruleId.includes("IDOR")) return ["CWE-639", "CWE-284", "CWE-285", "CWE-862", "CWE-200", "CWE-312", "CWE-359"];
   if (ruleId.includes("USER-ENUMERATION")) return ["CWE-204"];
   if (ruleId.includes("RATE-LIMIT")) return ["CWE-770"];
   if (ruleId.includes("REGEX-DOS")) return ["CWE-1333"];
   if (ruleId.includes("PATH-TRAVERSAL")) return ["CWE-22"];
   if (ruleId.includes("HARDCODED-CREDENTIAL")) return ["CWE-798", "CWE-259", "CWE-321"];
-  if (ruleId.includes("DEBUG-MODE")) return ["CWE-215", "CWE-489", "CWE-16"];
+  if (ruleId.includes("WEAK-PASSWORD-HASH")) return ["CWE-916", "CWE-327", "CWE-328", "CWE-312"];
+  if (ruleId.includes("DEBUG-MODE")) return ["CWE-215", "CWE-489", "CWE-16", "CWE-200", "CWE-209"];
+  if (ruleId.includes("INSECURE-COOKIE")) return ["CWE-614", "CWE-1004"];
+  if (ruleId.includes("SECURITY-MISCONFIGURATION")) return ["CWE-16"];
   return [];
 }
 

@@ -10,6 +10,16 @@ export const defaultConfig: AuditConfig = {
 
 const defaultRules: PlaybookRule[] = [
   {
+    id: "CONFIG-WAF-DISABLED-001",
+    title: "Reverse-proxy WAF is disabled",
+    description:
+      "A deployment configuration disables a WAF engine while retaining local security rules. The active profile and compensating controls require verification.",
+    severity: "HIGH",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/Caddyfile", "Caddyfile", "**/*.conf"],
+    enabled: true,
+  },
+  {
     id: "JS-DYNAMIC-CODE-001",
     title: "Dynamic code execution from a JavaScript/TypeScript call site",
     description:
@@ -180,6 +190,26 @@ const defaultRules: PlaybookRule[] = [
     enabled: true,
   },
   {
+    id: "PY-NOSQL-INJECTION-001",
+    title: "Structured request data reaches a Python NoSQL query",
+    description:
+      "A raw request object appears to reach a Mongo-like query API. Fixed-key scalar lookups are kept separate from operator-bearing query objects.",
+    severity: "HIGH",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.py"],
+    enabled: true,
+  },
+  {
+    id: "PY-WEAK-PASSWORD-HASH-001",
+    title: "Password processed with a weak or fast hash",
+    description:
+      "A password-like value is passed to a general-purpose hash such as MD5 or SHA-1 instead of a password-specific memory-hard function.",
+    severity: "HIGH",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.py"],
+    enabled: true,
+  },
+  {
     id: "PY-SSTI-001",
     title: "Request-controlled template source in Python",
     description:
@@ -254,6 +284,26 @@ const defaultRules: PlaybookRule[] = [
     title: "Python application debug mode enabled",
     description:
       "Debug mode can expose stack traces and interactive tooling. Deployment configuration must be checked before treating this as exploitable.",
+    severity: "MEDIUM",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.py"],
+    enabled: true,
+  },
+  {
+    id: "PY-INSECURE-COOKIE-001",
+    title: "Python response sets an authentication cookie without transport flags",
+    description:
+      "A response sets a session or authentication cookie without an observed Secure or HttpOnly attribute. Deployment and framework defaults must be verified before closure.",
+    severity: "MEDIUM",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.py"],
+    enabled: true,
+  },
+  {
+    id: "PY-SECURITY-MISCONFIGURATION-001",
+    title: "Python security configuration weakens a host or debug boundary",
+    description:
+      "A Python deployment setting accepts arbitrary hosts or otherwise weakens a security boundary. The active environment and compensating controls require verification.",
     severity: "MEDIUM",
     evidenceRequired: "T2_REPRODUCIBLE",
     globs: ["**/*.py"],

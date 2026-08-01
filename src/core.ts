@@ -66,7 +66,8 @@ async function walk(root: string, current: string, config: AuditConfig, output: 
       continue;
     }
     const extension = path.extname(entry.name).toLowerCase();
-    if (config.includeExtensions.includes(extension)) output.push(relative);
+    const securityConfigFile = /^(?:caddyfile|nginx\.conf|haproxy\.cfg)$/i.test(entry.name);
+    if (config.includeExtensions.includes(extension) || securityConfigFile) output.push(relative);
   }
 }
 

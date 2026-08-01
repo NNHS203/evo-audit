@@ -805,3 +805,80 @@ test("Python property graph separates HTML output, password storage, and protect
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-MISSING-AUTH-001" && finding.locations.some((location) => location.line === 10)), false);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-REFLECTED-XSS-001" && finding.locations.some((location) => location.file === "utility.py")), false);
 });
+
+test("FastAPI route parameters preserve scalar-vs-object semantics and split shared sink flows", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-fastapi-graph-"));
+  await initWorkspace(root);
+  await writeFile(path.join(root, "main.py"), [
+    "from fastapi import FastAPI, Request",
+    "from fastapi.responses import HTMLResponse",
+    "app = FastAPI(docs_url=None)",
+    "",
+    "def run_query(query):",
+    "    return db.execute(query)",
+    "",
+    "def find_users(query):",
+    "    return users.find(query)",
+    "",
+    "@app.get('/select')",
+    "async def select(username: str):",
+    "    return run_query(f'SELECT * FROM users WHERE username = \"{username}\"')",
+    "",
+    "@app.get('/find')",
+    "async def fixed_find(username: str):",
+    "    return find_users({'username': username})",
+    "",
+    "@app.post('/find')",
+    "async def object_find(request: Request):",
+    "    query = await request.json()",
+    "    return find_users(query)",
+    "",
+    "@app.post('/reset')",
+    "async def reset():",
+    "    remove('db.sqlite')",
+    "",
+    "@app.get('/docs', include_in_schema=False)",
+    "def docs():",
+    "    return HTMLResponse('<html>docs</html>')",
+  ].join("\n"), "utf8");
+  const result = await runAudit(root, { output: path.join(root, "runs") });
+  const sql = result.run.findings.filter((finding) => finding.ruleId === "PY-SQL-INJECTION-001");
+  const nosql = result.run.findings.filter((finding) => finding.ruleId === "PY-NOSQL-INJECTION-001");
+  assert.equal(sql.length, 1);
+  assert.equal(nosql.length, 1);
+  assert.equal(nosql[0]?.locations.some((location) => location.line === 21), true);
+  assert.equal(result.run.findings.filter((finding) => finding.ruleId === "PY-MISSING-AUTH-001").length, 1);
+  assert.equal(result.run.findings.some((finding) => finding.locations.some((location) => location.line === 28)), false);
+  await writeFile(path.join(root, "Caddyfile"), "waf {\n    coraza_waf {\n        directives `SecRuleEngine Off`\n    }\n}\n", "utf8");
+  await mkdir(path.join(root, "tests"), { recursive: true });
+  await writeFile(path.join(root, "tests", "test_secrets.py"), "API_KEY = 'fixture-only'\\n", "utf8");
+  const configResult = await runAudit(root, { output: path.join(root, "runs-config") });
+  assert.equal(configResult.run.findings.some((finding) => finding.ruleId === "CONFIG-WAF-DISABLED-001"), true);
+  assert.equal(configResult.run.findings.some((finding) => finding.locations.some((location) => location.file === "tests/test_secrets.py")), false);
+});
+
+test("Python framework policies distinguish deployment settings, auth cookies, and object ownership", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-python-framework-policies-"));
+  await initWorkspace(root);
+  await writeFile(path.join(root, "settings.py"), [
+    "DEBUG = True",
+    "ALLOWED_HOSTS = ['*']",
+    "KEY = b'1234567890'",
+  ].join("\n"), "utf8");
+  await mkdir(path.join(root, "app", "views", "sessions"), { recursive: true });
+  await mkdir(path.join(root, "app", "views", "work_info"), { recursive: true });
+  await writeFile(path.join(root, "app", "views", "sessions", "views.py"), [
+    "def login(response, token):",
+    "    response.set_cookie('auth_token', token)",
+  ].join("\n"), "utf8");
+  await writeFile(path.join(root, "app", "views", "work_info", "views.py"), [
+    "def work_info(request, user_id):",
+    "    return User.objects.get(id=user_id)",
+  ].join("\n"), "utf8");
+  const result = await runAudit(root, { output: path.join(root, "runs") });
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-DEBUG-MODE-001"), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-SECURITY-MISCONFIGURATION-001"), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-HARDCODED-CREDENTIAL-001"), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-INSECURE-COOKIE-001"), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-IDOR-001"), true);
+});

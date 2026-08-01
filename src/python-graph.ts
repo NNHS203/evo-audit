@@ -15,6 +15,8 @@ interface PythonFunction {
   indent: number;
   endLine: number;
   parameters: string[];
+  parameterSpecs: string[];
+  route: boolean;
   nodeId: string;
 }
 
@@ -34,23 +36,25 @@ interface FragmentState extends PythonGraphFragment {
   nodeKeys: Map<string, string>;
   edgeKeys: Set<string>;
   flowKeys: Set<string>;
+  sourceKinds: Map<string, "STRUCTURED_REQUEST" | "BOUNDARY_PARAMETER" | "CONFIGURATION">;
 }
 
-const sourcePattern = /\b(?:request|req|ctx|context)\s*\.\s*(?:args|form|values|json|headers|cookies|files|GET|POST|PUT|PATCH|META|COOKIES|FILES|data|body|query_params|path_params)\b|\b(?:os\s*\.\s*environ(?:\s*\.\s*get)?|sys\s*\.\s*argv|input)\s*(?:\(|\b)/gi;
+const sourcePattern = /\b(?:request|req|ctx|context)\s*\.\s*(?:args|form|values|json|headers|cookies|files|GET|POST|PUT|PATCH|META|COOKIES|FILES|data|body|query_params|path_params)\b|\b(?:self\s*\.\s*)?get_argument\s*\(|\bself\s*\.\s*request\s*\.\s*(?:arguments|body|files|uri|query)\b|\b(?:os\s*\.\s*(?:environ(?:\s*\.\s*get)?|getenv)|sys\s*\.\s*argv|input)\s*(?:\(|\b)|\b(?:config|settings)\s*\.\s*[A-Za-z_]\w*(?:URL|URI|ENDPOINT|HOST|PORT|TOKEN|SECRET|KEY)\b/gi;
 
 const sinkPatterns: Array<{ kind: string; pattern: RegExp }> = [
   { kind: "DYNAMIC_CODE", pattern: /\b(?:eval|exec)\s*\(/gi },
   { kind: "COMMAND_EXECUTION", pattern: /\b(?:os\s*\.\s*(?:system|popen)|(?:popen|system)|subprocess\s*\.\s*(?:run|Popen|call|check_call|check_output|getoutput|getstatusoutput))\s*\(/gi },
   { kind: "COMMAND_EXECUTION", pattern: /\b(?:rp)\s*\([^)]*(?:\+|%|request|address|command|cmd)\b/gi },
-  { kind: "QUERY_EXECUTION", pattern: /\b(?:execute|executemany|executescript)\s*\(/gi },
+  { kind: "QUERY_EXECUTION", pattern: /\b(?:execute|executemany|executescript|raw)\s*\(/gi },
+  { kind: "NOSQL_QUERY", pattern: /\b(?:find|find_one|find_one_and_update|find_one_and_delete|delete_one|delete_many|update_one|update_many|replace_one|aggregate)\s*\(/gi },
   { kind: "SSTI", pattern: /\b(?:render_template_string|jinja2\s*\.\s*(?:Template|Environment)|Template)\s*\(/gi },
-  { kind: "REDIRECT", pattern: /\b(?:redirect|flask\s*\.\s*redirect)\s*\(/gi },
+  { kind: "REDIRECT", pattern: /\b(?:redirect|HttpResponseRedirect|flask\s*\.\s*redirect)\s*\(/gi },
   { kind: "OUTBOUND_REQUEST", pattern: /\b(?:requests|httpx|urllib\s*\.\s*request|urlopen)\s*\.\s*(?:get|post|put|patch|request|urlopen)\s*\(/gi },
   { kind: "XML_PARSE", pattern: /\b(?:etree\s*\.\s*(?:XMLParser|fromstring|parse)|XMLParser|fromstring)\s*\(/gi },
   { kind: "UNSAFE_DESERIALIZATION", pattern: /\b(?:pickle|marshal|yaml)\s*\.\s*(?:loads|load)\s*\(/gi },
-  { kind: "HTML_OUTPUT", pattern: /\b(?:return|make_response|Response)\b[^\r\n]*(?:\+|%)[^\r\n]*|(?:\+|%)[^\r\n]*\b[A-Za-z_]\w*\b[^\r\n]*(?:\+|%|(?:request|req)\s*\.)|(?:\+|%)[^\r\n]*\b(?:request|req)\s*\./gi },
-  { kind: "PASSWORD_STORAGE", pattern: /\b(?:password|passwd|secret)\s*=\s*(?:request|req|user_input|input|raw_input)\b/gi },
-  { kind: "PATH_FILE", pattern: /\b(?:open|send_file|send_from_directory)\s*\(/gi },
+  { kind: "HTML_OUTPUT", pattern: /\b(?:return|make_response|Response|HttpResponse)\b[^\r\n]*(?:\+|%)[^\r\n]*|(?:\+|%)[^\r\n]*\b[A-Za-z_]\w*\b[^\r\n]*(?:\+|%|(?:request|req)\s*\.)|(?:\+|%)[^\r\n]*\b(?:request|req)\s*\./gi },
+  { kind: "PASSWORD_STORAGE", pattern: /\b(?:password|passwd|secret)\s*=\s*(?:request|req|user_input|input|raw_input|form|data|payload)\b/gi },
+  { kind: "PATH_FILE", pattern: /\b(?:open|send_file|send_from_directory|os\s*\.\s*path\s*\.\s*join)\s*\(/gi },
 ];
 
 const guardPattern = /\b(?:sanitize|sanitise|validate|allowlist|allow_list|escape|safe_join|authorize|authorise|permission|is_safe|parameterized|parameterised)\s*\(/i;
@@ -149,7 +153,64 @@ function namesIn(text: string, names: Iterable<string>): string[] {
 }
 
 function boundaryParameter(name: string): boolean {
-  return /^(?:request|req|ctx|context|user_input|raw_input|input|payload|query|params|body|url|command|cmd|filename|username|user_id|book_title|title|slug|identifier|email)$/i.test(name);
+  return /^(?:request|req|ctx|context|user_input|raw_input|input|payload|query|params|body|url|command|cmd|filename|file_name|full_file_name|full_path|data_path|username|user_id|user_id_form|book_title|title|slug|identifier|email|input_email|input_password|password|ip|host|port|col|field|redirect|next)$/i.test(name);
+}
+
+function splitParameterSpecs(value: string): string[] {
+  const output: string[] = [];
+  let start = 0;
+  let depth = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const current = value[index];
+    if (current === "(" || current === "[" || current === "{") depth += 1;
+    else if (current === ")" || current === "]" || current === "}") depth = Math.max(0, depth - 1);
+    else if (current === "," && depth === 0) {
+      output.push(value.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+  const final = value.slice(start).trim();
+  if (final) output.push(final);
+  return output;
+}
+
+function isRouteDecorator(line: string): boolean {
+  return /^\s*@\s*(?:[A-Za-z_]\w*\s*\.\s*)?(?:route|get|post|put|patch|delete|options|head|api_route)\s*\(/i.test(line);
+}
+
+function hasRouteDecorator(lines: string[], functionIndex: number): boolean {
+  for (let cursor = functionIndex - 1; cursor >= 0; cursor -= 1) {
+    const line = lines[cursor] ?? "";
+    if (!line.trim()) continue;
+    if (line.trim().startsWith("@")) {
+      if (isRouteDecorator(line)) return true;
+      continue;
+    }
+    break;
+  }
+  return false;
+}
+
+function routeBoundaryParameter(spec: string, name: string, route: boolean): boolean {
+  if (route && /\b(?:Depends|Security)\s*\(/i.test(spec)) return false;
+  if (boundaryParameter(name)) return true;
+  if (!route) return false;
+  if (/\b(?:BackgroundTasks|Response|WebSocket)\b/i.test(spec)) return false;
+  if (/^(?:self|cls|db|database|session|settings|config|current_user|principal|claims|token|credentials|background_tasks|response|websocket|app)$/i.test(name)) return false;
+  return true;
+}
+
+function sourceKind(text: string): "STRUCTURED_REQUEST" | "BOUNDARY_PARAMETER" | "CONFIGURATION" {
+  if (/\b(?:config|settings)\s*\./i.test(text)) return "CONFIGURATION";
+  return /\b(?:request|req)\s*\.\s*(?:json|body|data|query_params|path_params|form|values|files|GET|POST|PUT|PATCH|META|COOKIES|FILES)\b|\b(?:self\s*\.\s*)?get_argument\s*\(|\bself\s*\.\s*request\s*\.\s*(?:arguments|body|files|uri|query)\b/i.test(text)
+    ? "STRUCTURED_REQUEST"
+    : "BOUNDARY_PARAMETER";
+}
+
+function isPasswordPersistenceContext(context: string): boolean {
+  return /\b(?:User|Account|Credential|Customer|Profile|Model)\s*\(/i.test(context)
+    || /\b(?:objects|db|session|record|model)\s*\.\s*(?:create|create_user|add|insert|update|save|bulk_create)\s*\(/i.test(context)
+    || /\b(?:create_user|register_user)\s*\(/i.test(context);
 }
 
 function linePosition(line: number, offset: number): { line: number; column: number; endLine: number } {
@@ -219,17 +280,37 @@ function callArgumentText(line: string, index: number): string {
   return line.slice(open + 1);
 }
 
-function functionNameAndParameters(line: string): { name: string; parameters: string[]; indent: number } | null {
-  const match = line.match(/^(\s*)(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*:/);
-  if (!match) return null;
-  const parameters = match[3]
-    .split(",")
-    .map((parameter) => parameter.trim().replace(/=.*$/, "").replace(/^\*+/, "").split(":", 1)[0].trim())
-    .filter((parameter) => /^[A-Za-z_]\w*$/.test(parameter));
-  return { name: match[2], parameters, indent: indentation(line) };
+function boundedCallText(lines: string[], lineIndex: number, sinkIndex: number): string {
+  let output = lines[lineIndex] ?? "";
+  let depth = 0;
+  let started = false;
+  const updateDepth = (value: string): void => {
+    for (const character of value.slice(started ? 0 : sinkIndex)) {
+      if (character === "(") {
+        depth += 1;
+        started = true;
+      } else if (character === ")" && started) depth = Math.max(0, depth - 1);
+    }
+  };
+  updateDepth(output);
+  for (let cursor = lineIndex + 1; depth > 0 && cursor < Math.min(lines.length, lineIndex + 6); cursor += 1) {
+    output += ` ${lines[cursor] ?? ""}`;
+    updateDepth(lines[cursor] ?? "");
+  }
+  return output;
 }
 
-function findFunctions(file: string, lines: string[]): PythonFunction[] {
+function functionNameAndParameters(line: string): { name: string; parameters: string[]; parameterSpecs: string[]; indent: number } | null {
+  const match = line.match(/^(\s*)(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*:/);
+  if (!match) return null;
+  const parameterSpecs = splitParameterSpecs(match[3]);
+  const parameters = parameterSpecs
+    .map((parameter) => parameter.replace(/=.*$/, "").replace(/^\*+/, "").split(":", 1)[0].trim())
+    .filter((parameter) => /^[A-Za-z_]\w*$/.test(parameter));
+  return { name: match[2], parameters, parameterSpecs, indent: indentation(line) };
+}
+
+function findFunctions(file: string, lines: string[], tornadoHandler = false): PythonFunction[] {
   const functions: PythonFunction[] = [];
   for (let index = 0; index < lines.length; index += 1) {
     const parsed = functionNameAndParameters(lines[index]);
@@ -242,7 +323,17 @@ function findFunctions(file: string, lines: string[]): PythonFunction[] {
       }
     }
     const nodeId = `function:py:${stableId([file, String(index + 1), String(parsed.indent + 1), "FUNCTION", parsed.name])}`;
-    functions.push({ name: parsed.name, file, line: index + 1, indent: parsed.indent, endLine, parameters: parsed.parameters, nodeId });
+    functions.push({
+      name: parsed.name,
+      file,
+      line: index + 1,
+      indent: parsed.indent,
+      endLine,
+      parameters: parsed.parameters,
+      parameterSpecs: parsed.parameterSpecs,
+      route: hasRouteDecorator(lines, index) || (tornadoHandler && /^(?:get|post|put|patch|delete|head|options)$/i.test(parsed.name)),
+      nodeId,
+    });
   }
   return functions;
 }
@@ -257,13 +348,40 @@ function sinkRuleKind(kind: string): string {
   return kind;
 }
 
+function addSourceNode(
+  state: FragmentState,
+  file: string,
+  line: number,
+  column: number,
+  name: string,
+  detail: string,
+  snippet: string,
+  kind: "STRUCTURED_REQUEST" | "BOUNDARY_PARAMETER" | "CONFIGURATION",
+): string {
+  const id = addNode(state, file, line, column, "SOURCE", name, detail, snippet);
+  state.sourceKinds.set(id, kind);
+  return id;
+}
+
+function flowOriginsForSink(state: FragmentState, sinkKind: string, origins: Iterable<string>): string[] {
+  const values = [...origins];
+  if (sinkKind === "SSTI") return values.filter((origin) => state.sourceKinds.get(origin) !== "CONFIGURATION");
+  if (sinkKind !== "NOSQL_QUERY") return values;
+  // A scalar route value interpolated into a fixed object key is not a NoSQL
+  // operator injection. Require a structured request object to reach the
+  // query sink, which preserves the important distinction in Mongo-like APIs.
+  return values.filter((origin) => state.sourceKinds.get(origin) === "STRUCTURED_REQUEST");
+}
+
 function buildPythonFile(state: FragmentState, file: FileFingerprint, content: string, allFiles: Set<string>): void {
   const normalizedFile = normalizePath(file.path);
   const rawLines = content.split(/\r?\n/);
   const lines = maskPython(content).split(/\r?\n/);
-  const functions = findFunctions(normalizedFile, lines);
-  const webContext = /\b(?:flask|django|fastapi|starlette|bottle|render_template|request)\b/i.test(content);
+  const tornadoContext = /\b(?:tornado\s*\.\s*web\s*\.\s*RequestHandler|RequestHandler)\b/.test(content);
+  const functions = findFunctions(normalizedFile, lines, tornadoContext);
+  const webContext = /\b(?:flask|django|fastapi|starlette|bottle|tornado|render_template|request)\b/i.test(content);
   const htmlContext = webContext && (/<\s*(?:html|body|br|form|script|iframe|img|a|p|div|span|h[1-6]|li|ul|ol|table|textarea)\b/i.test(content) || /\brender_template_string\s*\(/i.test(content));
+  const modelContext = /(?:^|\/)models(?:\/|$)/i.test(normalizedFile);
   for (const fn of functions) {
     addNode(state, normalizedFile, fn.line, fn.indent + 1, "FUNCTION", fn.name, "Python function scope used for bounded source-to-sink analysis.", rawLines[fn.line - 1] ?? "");
     addEdge(state, { from: fileNodeId(normalizedFile), to: fn.nodeId, kind: "CONTAINS", confidence: "HIGH" });
@@ -291,11 +409,14 @@ function buildPythonFile(state: FragmentState, file: FileFingerprint, content: s
   for (const scope of scopes) {
     const stateByName: TaintState = { origins: new Map(), parameters: new Map() };
     const pendingTemplates = new Map<string, number>();
+    const explicitVulnerableBranch = scope.function ? /\bif\s+vuln\b/.test(lines.slice(scope.start, scope.end).join("\n")) : false;
     for (const parameter of scope.parameters) {
       stateByName.parameters.set(parameter, new Set([parameter]));
-      if (boundaryParameter(parameter) && scope.function) {
+      const parameterIndex = scope.function?.parameters.indexOf(parameter) ?? -1;
+      const parameterSpec = parameterIndex >= 0 ? scope.function?.parameterSpecs[parameterIndex] ?? parameter : parameter;
+      if (scope.function && (scope.function.route || explicitVulnerableBranch || modelContext) && routeBoundaryParameter(parameterSpec, parameter, true)) {
         const offset = Math.max(0, (rawLines[scope.function.line - 1] ?? "").indexOf(parameter));
-        const sourceId = addNode(state, normalizedFile, scope.function.line, offset + 1, "SOURCE", parameter, "Conservatively treated as an external boundary parameter.", rawLines[scope.function.line - 1] ?? "");
+        const sourceId = addSourceNode(state, normalizedFile, scope.function.line, offset + 1, parameter, scope.function.route ? "FastAPI or web route parameter treated as an external boundary input." : "Conservatively treated as an external boundary parameter.", rawLines[scope.function.line - 1] ?? "", "BOUNDARY_PARAMETER");
         stateByName.origins.set(parameter, new Set([sourceId]));
       }
     }
@@ -324,7 +445,7 @@ function buildPythonFile(state: FragmentState, file: FileFingerprint, content: s
         const rawAssignment = raw.match(/^\s*[A-Za-z_]\w*\s*=\s*(?![=])(.+)$/)?.[1] ?? raw;
         const origins = new Set<string>();
         for (const source of sourceMatches(expression)) {
-          const sourceId = addNode(state, normalizedFile, lineIndex + 1, masked.indexOf(source.text) + 1, "SOURCE", source.text.trim(), "Attacker-controlled or environment-derived Python input.", raw);
+          const sourceId = addSourceNode(state, normalizedFile, lineIndex + 1, masked.indexOf(source.text) + 1, source.text.trim(), "Attacker-controlled or environment-derived Python input.", raw, sourceKind(source.text));
           origins.add(sourceId);
         }
         for (const variable of namesIn(expression, stateByName.origins.keys())) for (const origin of stateByName.origins.get(variable) ?? []) origins.add(origin);
@@ -347,21 +468,42 @@ function buildPythonFile(state: FragmentState, file: FileFingerprint, content: s
 
       if (!masked.trim()) continue;
 
-      for (const sink of sinkMatches(masked, htmlContext)) {
+      const sinks = sinkMatches(masked, htmlContext);
+      const htmlAssignment = htmlContext
+        && /^\s*[A-Za-z_]\w*\s*=/.test(masked)
+        && /<\s*(?:html|body|h[1-6]|p|div|span|a|script|iframe|code)\b/i.test(raw)
+        && /(?:\{\s*[A-Za-z_]\w*[^}]*\}|%\s*[A-Za-z_(])/.test(raw)
+        && !sinks.some((sink) => sink.kind === "HTML_OUTPUT");
+      if (htmlAssignment) sinks.push({ index: Math.max(0, masked.search(/[A-Za-z_]\w*\s*=/)), text: "HTML assignment", kind: "HTML_OUTPUT" });
+      for (const sink of sinks.sort((left, right) => left.index - right.index || left.kind.localeCompare(right.kind))) {
+        if (sink.kind === "PASSWORD_STORAGE") {
+          const context = lines
+            .slice(Math.max(0, lineIndex - 2), Math.min(lines.length, lineIndex + 3))
+            .join(" ");
+          if (!isPasswordPersistenceContext(context)) continue;
+        }
         const callNodeId = addNode(state, normalizedFile, lineIndex + 1, sink.index + 1, "CALL", sink.text.replace(/\s*\($/, ""), "Python call expression discovered by the source-to-sink graph.", raw);
         addEdge(state, { from: currentFunction?.nodeId ?? fileNodeId(normalizedFile), to: callNodeId, kind: "CALLS", confidence: "MEDIUM", label: sink.text });
         const sinkNodeId = addNode(state, normalizedFile, lineIndex + 1, sink.index + 1, "SINK", sink.text.replace(/\s*\($/, ""), sinkRuleKind(sink.kind), raw);
         addEdge(state, { from: callNodeId, to: sinkNodeId, kind: "CONTAINS", confidence: "HIGH", label: sink.kind });
-        const argumentText = sink.kind === "HTML_OUTPUT" || sink.kind === "PASSWORD_STORAGE" ? masked : callArgumentText(masked, sink.index);
+        const multilineCall = /^(?:QUERY_EXECUTION|COMMAND_EXECUTION|PATH_FILE)$/.test(sink.kind)
+          ? boundedCallText(lines, lineIndex, sink.index)
+          : masked;
+        const rawMultilineCall = /^(?:QUERY_EXECUTION|COMMAND_EXECUTION|PATH_FILE)$/.test(sink.kind)
+          ? boundedCallText(rawLines, lineIndex, sink.index)
+          : raw;
+        const argumentText = sink.kind === "HTML_OUTPUT" || sink.kind === "PASSWORD_STORAGE" ? masked : callArgumentText(multilineCall, sink.index);
+        if (sink.kind === "PATH_FILE" && /\b(?:wb|ab|w|a)\b/i.test(rawMultilineCall) && /(?:\/tmp\/|\\\\tmp\\\\|final_filename|output_file)/i.test(rawMultilineCall)) continue;
         const origins = new Set<string>();
-        for (const source of sourceMatches(argumentText)) {
-          const sourceId = addNode(state, normalizedFile, lineIndex + 1, sink.index + Math.max(1, argumentText.indexOf(source.text)) + 2, "SOURCE", source.text.trim(), "Attacker-controlled or environment-derived Python input.", raw);
+        const matchedSources = sourceMatches(argumentText).filter((source) => sink.kind !== "PASSWORD_STORAGE" || source.index >= sink.index);
+        for (const source of matchedSources) {
+          const sourceId = addSourceNode(state, normalizedFile, lineIndex + 1, sink.index + Math.max(1, argumentText.indexOf(source.text)) + 2, source.text.trim(), "Attacker-controlled or environment-derived Python input.", raw, sourceKind(source.text));
           origins.add(sourceId);
         }
         for (const variable of namesIn(argumentText, stateByName.origins.keys())) for (const origin of stateByName.origins.get(variable) ?? []) origins.add(origin);
         const parameterNames = new Set<string>();
         for (const variable of namesIn(argumentText, stateByName.parameters.keys())) for (const parameter of stateByName.parameters.get(variable) ?? []) parameterNames.add(parameter);
-        for (const origin of origins) addFlow(state, origin, sinkNodeId, controls, `A Python boundary value reaches a ${sink.kind} sink.`, [origin, callNodeId, sinkNodeId]);
+        for (const origin of flowOriginsForSink(state, sink.kind, origins)) addFlow(state, origin, sinkNodeId, controls, `A Python boundary value reaches a ${sink.kind} sink.`, [origin, callNodeId, sinkNodeId]);
         if (currentFunction && parameterNames.size > 0) summaries.push({ function: currentFunction, sinkNodeId, kind: sink.kind, parameterNames: [...parameterNames].sort() });
       }
     }
@@ -373,10 +515,14 @@ function buildPythonFile(state: FragmentState, file: FileFingerprint, content: s
   for (const scope of scopes) {
     const currentFunction = scope.function;
     const stateByName: TaintState = { origins: new Map(), parameters: new Map() };
+    const pendingTemplates = new Map<string, number>();
+    const explicitVulnerableBranch = currentFunction ? /\bif\s+vuln\b/.test(lines.slice(scope.start, scope.end).join("\n")) : false;
     for (const parameter of scope.parameters) {
       stateByName.parameters.set(parameter, new Set([parameter]));
-      if (boundaryParameter(parameter) && currentFunction) {
-        const sourceId = addNode(state, normalizedFile, currentFunction.line, Math.max(1, (rawLines[currentFunction.line - 1] ?? "").indexOf(parameter) + 1), "SOURCE", parameter, "Conservatively treated as an external boundary parameter.", rawLines[currentFunction.line - 1] ?? "");
+      const parameterIndex = currentFunction?.parameters.indexOf(parameter) ?? -1;
+      const parameterSpec = parameterIndex >= 0 ? currentFunction?.parameterSpecs[parameterIndex] ?? parameter : parameter;
+      if (currentFunction && (currentFunction.route || explicitVulnerableBranch || modelContext) && routeBoundaryParameter(parameterSpec, parameter, true)) {
+        const sourceId = addSourceNode(state, normalizedFile, currentFunction.line, Math.max(1, (rawLines[currentFunction.line - 1] ?? "").indexOf(parameter) + 1), parameter, currentFunction.route ? "FastAPI or web route parameter treated as an external boundary input." : "Conservatively treated as an external boundary parameter.", rawLines[currentFunction.line - 1] ?? "", "BOUNDARY_PARAMETER");
         stateByName.origins.set(parameter, new Set([sourceId]));
       }
     }
@@ -384,18 +530,25 @@ function buildPythonFile(state: FragmentState, file: FileFingerprint, content: s
       const masked = lines[lineIndex] ?? "";
       const raw = rawLines[lineIndex] ?? "";
       if (!scope.function && functions.some((fn) => lineIndex >= fn.line - 1 && lineIndex < fn.endLine)) continue;
-      if (!masked.trim() || functionNameAndParameters(masked)) continue;
+      if (functionNameAndParameters(masked)) continue;
+      for (const [templateName, startLine] of pendingTemplates) {
+        const embeddedOrigins = [...new Set(namesIn(raw, stateByName.origins.keys()).flatMap((name) => [...(stateByName.origins.get(name) ?? [])]))];
+        if (embeddedOrigins.length > 0) stateByName.origins.set(templateName, new Set(embeddedOrigins));
+        if (lineIndex > startLine && /(?:'''|\"\"\")/.test(raw)) pendingTemplates.delete(templateName);
+      }
+      if (!masked.trim()) continue;
       const assignment = masked.match(/^\s*([A-Za-z_]\w*)\s*=\s*(?![=])(.+)$/);
       if (assignment) {
         const origins = new Set<string>();
         for (const variable of namesIn(assignment[2], stateByName.origins.keys())) for (const origin of stateByName.origins.get(variable) ?? []) origins.add(origin);
-        for (const source of sourceMatches(assignment[2])) origins.add(addNode(state, normalizedFile, lineIndex + 1, Math.max(1, masked.indexOf(source.text) + 1), "SOURCE", source.text.trim(), "Attacker-controlled or environment-derived Python input.", raw));
+        for (const source of sourceMatches(assignment[2])) origins.add(addSourceNode(state, normalizedFile, lineIndex + 1, Math.max(1, masked.indexOf(source.text) + 1), source.text.trim(), "Attacker-controlled or environment-derived Python input.", raw, sourceKind(source.text)));
         const parameters = new Set<string>();
         for (const variable of namesIn(assignment[2], stateByName.parameters.keys())) for (const parameter of stateByName.parameters.get(variable) ?? []) parameters.add(parameter);
         if (origins.size > 0 || parameters.size > 0) {
           stateByName.origins.set(assignment[1], origins);
           stateByName.parameters.set(assignment[1], parameters);
         }
+        if (/(?:'''|\"\"\")/.test(raw)) pendingTemplates.set(assignment[1], lineIndex);
       }
       const calls = [...masked.matchAll(/\b([A-Za-z_]\w*)\s*\(/g)];
       for (const call of calls) {
@@ -403,7 +556,7 @@ function buildPythonFile(state: FragmentState, file: FileFingerprint, content: s
         const candidates = functionsByName.get(helperName) ?? [];
         if (candidates.length !== 1 || candidates[0] === currentFunction) continue;
         const helper = candidates[0];
-        const argumentText = callArgumentText(masked, call.index ?? 0);
+        const argumentText = callArgumentText(raw, call.index ?? 0);
         const argumentOrigins = [...new Set(namesIn(argumentText, stateByName.origins.keys()).flatMap((name) => [...(stateByName.origins.get(name) ?? [])]))];
         if (argumentOrigins.length === 0) continue;
         const args = argumentText.split(",").map((value) => value.trim());
@@ -413,7 +566,7 @@ function buildPythonFile(state: FragmentState, file: FileFingerprint, content: s
             if (parameterIndex < 0) continue;
             const argument = args[parameterIndex] ?? "";
             const origins = [...new Set(namesIn(argument, stateByName.origins.keys()).flatMap((name) => [...(stateByName.origins.get(name) ?? [])]))];
-            for (const origin of origins) {
+            for (const origin of flowOriginsForSink(state, summary.kind, origins)) {
               const callNodeId = addNode(state, normalizedFile, lineIndex + 1, (call.index ?? 0) + 1, "CALL", helperName, "Python helper call used for interprocedural flow resolution.", raw);
               addEdge(state, { from: currentFunction?.nodeId ?? fileNodeId(normalizedFile), to: callNodeId, kind: "CALLS", confidence: "MEDIUM", label: helperName });
               addFlow(state, origin, summary.sinkNodeId, [], `A tainted argument reaches Python helper parameter ${parameter} and then a ${summary.kind} sink.`, [origin, callNodeId, summary.sinkNodeId]);
@@ -430,8 +583,9 @@ function pathWithoutExtension(file: string): string {
 }
 
 export function buildPythonGraph(files: FileFingerprint[], contents: Map<string, string>): PythonGraphFragment {
-  const state: FragmentState = { nodes: [], edges: [], flows: [], nodeKeys: new Map(), edgeKeys: new Set(), flowKeys: new Set() };
-  const allFiles = new Set(files.map((file) => normalizePath(file.path)));
-  for (const file of files.filter((candidate) => candidate.path.toLowerCase().endsWith(".py"))) buildPythonFile(state, file, contents.get(file.path) ?? "", allFiles);
+  const state: FragmentState = { nodes: [], edges: [], flows: [], nodeKeys: new Map(), edgeKeys: new Set(), flowKeys: new Set(), sourceKinds: new Map() };
+  const productionFiles = files.filter((candidate) => !/(?:^|[\\/])(?:test|tests|spec|specs|fixture|fixtures|example|examples)(?:[\\/]|$)/i.test(candidate.path));
+  const allFiles = new Set(productionFiles.map((file) => normalizePath(file.path)));
+  for (const file of productionFiles.filter((candidate) => candidate.path.toLowerCase().endsWith(".py"))) buildPythonFile(state, file, contents.get(file.path) ?? "", allFiles);
   return { nodes: state.nodes, edges: state.edges, flows: state.flows };
 }
