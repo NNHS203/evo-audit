@@ -111,16 +111,18 @@ independent runtime validator was supplied.
 
 The reproducible optimized run is [RealVuln v2 optimized aggregate](../benchmark/results/realvuln-v2-aggregate-optimized-20260801.json).
 It uses the same 62 completed repositories, four explicit blocked entries, and
-the same one-to-one scorer, but the `0d42bae` scanner revision adds Python
+the same one-to-one scorer, but the `75e9271` scanner revision adds Python
 property/taint semantics, framework-aware policy evidence, GraphQL mutation
-ownership tracing, request-mapping mass-assignment tracing, framework-aware authentication throttling boundaries, template unsafe-output checks, session-integrity
-separation, generated-asset filtering, parameterized-query recognition,
-Graphene/Tornado auth-surface coverage, and gap analysis. It produced 821
-candidates: precision `0.821`, recall `0.383`, FPR `0.372`, and F3 `0.404`.
+ownership tracing, request-mapping mass-assignment tracing, route-aware Python
+object-ownership tracing, framework-aware authentication throttling boundaries,
+template unsafe-output checks, session-integrity separation, generated-asset
+filtering, parameterized-query recognition, Graphene/Tornado auth-surface
+coverage, and gap analysis. It produced 825 candidates: precision `0.822`,
+recall `0.385`, FPR `0.372`, and F3 `0.406`.
 The run used no model or runtime validator, so reportable recall remains `0` by
 policy. Relative to the checked-in baseline, true positives increased from
-307 to 674 and false positives decreased from 355 to 147; the candidate count
-changed from 662 to 821. These are observed improvements over the checked-in
+307 to 678 and false positives decreased from 355 to 147; the candidate count
+changed from 662 to 825. These are observed improvements over the checked-in
 baseline, not a claim of superiority over OpenAI, Cloudflare, or research
 baselines.
 
@@ -129,9 +131,9 @@ language-specific weakness:
 
 | Framework | Repositories | Labels | Precision | Recall | FPR | F3 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Flask | 12 | 341 | 0.745 | 0.380 | 0.447 | 0.400 |
+| Flask | 12 | 341 | 0.750 | 0.390 | 0.447 | 0.410 |
 | Django | 22 | 761 | 0.831 | 0.461 | 0.420 | 0.482 |
-| FastAPI | 23 | 707 | 0.843 | 0.361 | 0.341 | 0.383 |
+| FastAPI | 23 | 707 | 0.843 | 0.363 | 0.341 | 0.385 |
 | Tornado | 1 | 17 | 1.000 | 0.786 | 0.000 | 0.803 |
 | Other Python / aiohttp | 4 | 192 | 0.818 | 0.111 | 0.118 | 0.122 |
 
@@ -179,9 +181,10 @@ The runner verifies the checkout HEAD, copies it read-only into an isolated
 temporary case workspace, excludes `.git`, dependencies, build output, and
 audit configuration, then records the resulting source tree digest.
 
-The checked-in `framework-holdout` split adds eight dependency-free cases for
-FastAPI SQL/NoSQL flows, Django object ownership, Flask uploads, Express
-command/redirect flows, and safe controls. Run it with the pinned manifest:
+The checked-in `framework-holdout` split adds twelve dependency-free cases for
+FastAPI SQL/NoSQL flows, FastAPI and Flask object ownership, Django object
+ownership, Flask uploads, Express command/redirect flows, and safe controls.
+Run it with the pinned manifest:
 
 ```bash
 evo-audit benchmark ./benchmark/cases \
@@ -190,7 +193,7 @@ evo-audit benchmark ./benchmark/cases \
 ```
 
 The current deterministic observation is candidate precision `1.000`, recall
-`1.000`, and FPR `0.000` on these eight cases; it remains a holdout observation,
+`1.000`, and FPR `0.000` on these twelve cases; it remains a holdout observation,
 and reportable recall is `0.000` until independent validation runs.
 
 ### Independent validator holdout

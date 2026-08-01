@@ -6,7 +6,7 @@
   "groundTruthVersion": "2.0.0",
   "benchmarkRepositoryRevision": "98872da5caa25eb4d4bc7d5b93e10e08148a2049",
   "scanner": "evo-audit",
-  "scannerCommit": "0d42baec26ad22d855efa8e0b16cbfbea93283e6",
+  "scannerCommit": "75e9271c71f527bd0dc21936e9f12a69249c6389",
   "execution": {
     "manifestRepositories": 66,
     "completedRepositories": 62,
@@ -21,20 +21,20 @@
     "labels": 2018,
     "vulnerableLabels": 1762,
     "safeLabels": 256,
-    "findings": 821,
+    "findings": 825,
     "unsupportedClaimCount": 0,
     "unsupportedClaimRate": 0,
     "candidate": {
-      "truePositive": 674,
+      "truePositive": 678,
       "falsePositive": 147,
-      "falseNegative": 1088,
+      "falseNegative": 1084,
       "trueNegative": 248,
-      "candidateCount": 821,
+      "candidateCount": 825,
       "validatedCount": 0,
-      "precision": 0.8209500609013398,
-      "recall": 0.38251986379114644,
+      "precision": 0.8218181818181818,
+      "recall": 0.3847900113507378,
       "falsePositiveRate": 0.3721518987341772,
-      "f3": 0.4041009652856886,
+      "f3": 0.40640172630821797,
       "tokensPerValidatedFinding": null
     },
     "reportable": {
@@ -52,19 +52,19 @@
     }
   },
   "frameworkSummary": {
-    "flask": { "repositories": 12, "labels": 341, "findings": 149, "precision": 0.7449664429530202, "recall": 0.3801369863013699, "falsePositiveRate": 0.4470588235294118, "f3": 0.3997119193374145 },
+    "flask": { "repositories": 12, "labels": 341, "findings": 152, "precision": 0.75, "recall": 0.3904109589041096, "falsePositiveRate": 0.4470588235294118, "f3": 0.4100719424460432 },
     "django": { "repositories": 22, "labels": 761, "findings": 372, "precision": 0.8306451612903226, "recall": 0.46050670640834573, "falsePositiveRate": 0.42, "f3": 0.48198408984557783 },
     "python": { "repositories": 3, "labels": 165, "findings": 19, "precision": 0.7894736842105263, "recall": 0.1079136690647482, "falsePositiveRate": 0.13333333333333333, "f3": 0.11811023622047244 },
     "aiohttp": { "repositories": 1, "labels": 27, "findings": 3, "precision": 1, "recall": 0.13043478260869565, "falsePositiveRate": 0, "f3": 0.14285714285714288 },
-    "fastapi": { "repositories": 23, "labels": 707, "findings": 267, "precision": 0.8426966292134831, "recall": 0.3611556982343499, "falsePositiveRate": 0.34146341463414637, "f3": 0.38304392236976503 },
+    "fastapi": { "repositories": 23, "labels": 707, "findings": 268, "precision": 0.8432835820895522, "recall": 0.36276083467094705, "falsePositiveRate": 0.34146341463414637, "f3": 0.3846808510638298 },
     "tornado": { "repositories": 1, "labels": 17, "findings": 11, "precision": 1, "recall": 0.7857142857142857, "falsePositiveRate": 0, "f3": 0.802919708029197 }
   },
   "comparisonToCheckedInBaseline": {
     "baseline": "benchmark/results/realvuln-v2-aggregate-20260801.json",
-    "candidatePrecision": { "baseline": 0.4637462235649547, "optimized": 0.8209500609013398, "delta": 0.3572038373363851 },
-    "candidateRecall": { "baseline": 0.17423382519863792, "optimized": 0.38251986379114644, "delta": 0.20828603859250852 },
+    "candidatePrecision": { "baseline": 0.4637462235649547, "optimized": 0.8218181818181818, "delta": 0.3580719582532271 },
+    "candidateRecall": { "baseline": 0.17423382519863792, "optimized": 0.3847900113507378, "delta": 0.2105561861520999 },
     "falsePositiveRate": { "baseline": 0.5916666666666667, "optimized": 0.3721518987341772, "delta": -0.21951476793248947 },
-    "f3": { "baseline": 0.1858353510895884, "optimized": 0.4041009652856886, "delta": 0.21826561419610022 }
+    "f3": { "baseline": 0.1858353510895884, "optimized": 0.40640172630821797, "delta": 0.22056637521862957 }
   },
   "blockedRepositories": [
     { "id": "realvuln-owasp-web-playground", "url": "https://github.com/yourrepo/OWASP-Web-Playground", "commit": "5e682aca1b58e03362a5fbd9fc88c37626e429ce", "reason": "PUBLISHED_URL_UNAVAILABLE" },
@@ -77,6 +77,6 @@
     "Blocked entries are excluded from score denominators and are not treated as safe.",
     "The deterministic audit produced zero model tokens; model-backed investigation was not run in this aggregate.",
     "Reportable findings require independent validation, so reportable recall is zero in this run by policy.",
-    "The optimized commit adds Python property/taint semantics, framework-aware policy evidence for Graphene and request handlers, GraphQL mutation ownership tracing, request-mapping mass-assignment tracing, framework-aware authentication throttling boundaries, template unsafe-output evidence, session-integrity separation, generated-asset filtering, parameterized-query recognition, and deterministic gap analysis."
+    "The optimized commit adds Python property/taint semantics, route-aware object-ownership tracing with explicit authorization suppression, framework-aware policy evidence for Graphene and request handlers, GraphQL mutation ownership tracing, request-mapping mass-assignment tracing, framework-aware authentication throttling boundaries, template unsafe-output evidence, session-integrity separation, generated-asset filtering, parameterized-query recognition, and deterministic gap analysis."
   ]
 }
