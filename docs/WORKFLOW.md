@@ -34,9 +34,12 @@ a security verdict.
 ### 2. Recon
 
 Recon is cheap and deterministic. It records manifests, useful package scripts,
-likely entrypoints, security-relevant surfaces, and a lexical module graph.
-This is context routing metadata, not semantic proof. It is deliberately
-small enough to be injected into every worker task.
+likely entrypoints, security-relevant surfaces, a lexical module graph, and a
+TypeScript/JavaScript AST graph with local source/sink flow facts. The AST flow
+is candidate evidence, not semantic proof: cross-function reachability,
+deployment conditions, sanitizer completeness, and exploitability still need
+the worker and independent validator. Compact graph slices are injected into
+worker tasks instead of the whole repository.
 
 ### 3. Plan
 
@@ -123,10 +126,9 @@ with unfinished repositories counted as misses:
 
 ## Current implementation boundary
 
-The repository currently implements the snapshot, recon, plan, evidence gate,
-compare, SARIF, and resumable state layers. The module graph is lexical and the
-validator consumes an independent result JSON; an execution-capable Docker or
-microVM runner is the next safety-critical layer. The next research layer is a
-TypeScript/JavaScript AST plus call/data-flow graph, followed by a held-out
-playbook evaluator. Neither layer should be claimed complete until it has
-reproducible benchmark results.
+The repository currently implements the snapshot, recon, AST/data-flow graph,
+coverage matrix, plan, evidence gate, compare, SARIF, resumable state, model
+provider, and container validation layers. The next safety-critical research
+layer is interprocedural symbol/data-flow resolution plus a held-out playbook
+evaluator. Neither recall nor false-negative performance should be claimed
+complete until it has reproducible benchmark results.

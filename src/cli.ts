@@ -5,8 +5,12 @@ import { initWorkspace, persistRunArtifacts, readJson, resolveInput, runAudit, s
 import { buildResumePlan } from "./resume.js";
 import { toSarif } from "./sarif.js";
 import { applyValidationResult, assertWorkspaceMatchesSnapshot, createValidationRequest } from "./validator.js";
+import { runValidationRequest } from "./validation-runner.js";
 import { mergeWorkerResult } from "./workers.js";
 import { buildAuditPlan, planSummary } from "./workflow.js";
+import { authorizeModel, loadModelConfig, ModelRegistry } from "./models.js";
+import { executeWorkerTask } from "./worker-runner.js";
+import { runBenchmark } from "./benchmark.js";
 import type { AuditRun, AuditWorkerResult, ValidationResult } from "./types.js";
 
 function usage(): string {
@@ -14,17 +18,22 @@ function usage(): string {
 
 Commands:
   init <path>                         Create audit.config.json and audit.playbook.json
+  models <path> [--config FILE]       List configured API/OAuth models and credential state
+  auth <path> <model-id>               Authorize a configured model with OAuth PKCE
   review <path> [--output DIR]        Run the audit core in review mode
   run <path> [--output DIR]           Alias for review
   run <path> --baseline RUN.json      Record semantic delta for worker prioritization
   run <path> --strict                 Show only evidence-policy reportable findings
   verify <run.json> <finding-id>      Create a validator request for one finding
   validate <run.json> <result.json>   Apply an independent validator result
+  validate-run <run.json> <request.json> Execute a request in a container sandbox
   compare <before.json> <after.json> Compare findings by root cause across runs
   plan <run.json> [--json]            Show prioritized investigation/validation tasks
   status <run.json>                   Show coverage and pending obligations
   resume <run.json> [--output FILE]   Write a resumable pending-work plan
   ingest <run.json> <worker.json>     Merge a Frontier worker result into a saved run
+  worker <run.json> <task-id>         Run one HUNT/INVESTIGATE task with a configured model
+  benchmark <cases-dir>               Run deterministic benchmark cases
   evolve <run.json> [--output FILE]   Propose playbook improvements from audit gaps
   report <run.json> [--format FORMAT] Print text, json, or sarif
 
@@ -53,6 +62,42 @@ async function main(): Promise<void> {
     const target = resolveInput(cwd, input);
     await initWorkspace(target);
     console.log(`Initialized Evo Audit in ${target}`);
+    return;
+  }
+
+  if (command === "benchmark") {
+    if (!input) throw new Error("benchmark requires a cases directory");
+    const report = await runBenchmark(path.resolve(cwd, input), valueFlag(args, "--split", "") || undefined);
+    if (flag(args, "--json")) console.log(JSON.stringify(report, null, 2));
+    else {
+      console.log(`Benchmark ${report.split}: ${report.metrics.cases} cases`);
+      console.log(`Candidate recall=${report.metrics.candidateRecall.toFixed(3)} precision=${report.metrics.candidatePrecision.toFixed(3)} false-positive-rate=${report.metrics.falsePositiveRate.toFixed(3)} unknown-coverage=${report.metrics.unknownCoverageRate.toFixed(3)} tokens/case=${report.metrics.tokensPerCase.toFixed(0)}`);
+      for (const item of report.cases) console.log(`- ${item.caseId}: ${item.expectedVulnerable ? "vulnerable" : "safe"} candidate=${item.candidateFound} match=${item.matchingCandidate} unknown=${item.coverageUnknown}`);
+    }
+    return;
+  }
+
+  if (command === "models") {
+    const target = resolveInput(cwd, input);
+    const modelConfig = await loadModelConfig(target, valueFlag(args, "--config", ""));
+    const statuses = await new ModelRegistry(modelConfig).statuses();
+    if (flag(args, "--json")) console.log(JSON.stringify({ auto: modelConfig.auto, models: statuses }, null, 2));
+    else {
+      console.log(`Auto model: ${modelConfig.auto.enabled ? "enabled" : "disabled"}`);
+      for (const model of statuses) console.log(`- ${model.id} model=${model.model} transport=${model.transport} auth=${model.authMethod} credential=${model.credentialAvailable ? "available" : "missing"} quality=${model.qualityTier}${model.reason ? ` (${model.reason})` : ""}`);
+      if (statuses.length === 0) console.log("No models configured. Add audit.models.json or use the environment-backed configuration documented in docs/MODELS.md.");
+    }
+    return;
+  }
+
+  if (command === "auth") {
+    if (!input || !secondInput) throw new Error("auth requires a path and model-id");
+    const target = resolveInput(cwd, input);
+    const modelConfig = await loadModelConfig(target, valueFlag(args, "--config", ""));
+    const model = modelConfig.models.find((candidate) => candidate.id === secondInput);
+    if (!model) throw new Error(`Model not found: ${secondInput}`);
+    const tokenFile = await authorizeModel(model, { openBrowser: !flag(args, "--no-open") });
+    console.log(`OAuth token saved to: ${tokenFile}`);
     return;
   }
 
@@ -107,6 +152,36 @@ async function main(): Promise<void> {
           notes: [...(validation.notes ?? []), `Workspace changed after snapshot: ${integrity.changed.join(", ")}`],
         };
     const applied = applyValidationResult(originalRun, checkedResult);
+    const session = await persistRunArtifacts(path.dirname(runPath), applied.run);
+    console.log(`${applied.gate.status}: ${applied.gate.reason}`);
+    console.log(summarizeRun(applied.run, { session }));
+    return;
+  }
+
+  if (command === "validate-run") {
+    if (!input || !secondInput) throw new Error("validate-run requires a run.json and request.json");
+    const runPath = path.resolve(cwd, input);
+    const run = await readJson<AuditRun>(runPath);
+    const request = await readJson<import("./types.js").ValidationRequest>(path.resolve(cwd, secondInput));
+    const validator = valueFlag(args, "--validator", "evo-audit-container-validator");
+    const integrity = await assertWorkspaceMatchesSnapshot(run);
+    const validation: ValidationResult = integrity.ok
+      ? await runValidationRequest(run, request, validator)
+      : {
+          schemaVersion: 1,
+          validator,
+          requestId: request.requestId,
+          runId: request.runId,
+          findingId: request.findingId,
+          outcome: "HARNESS_FAILED",
+          baseTreeDigest: run.snapshot.treeDigest,
+          sourceFiles: run.files,
+          sandbox: { profile: request.sandboxProfile, readOnlySource: true, network: "DENY" },
+          reproducer: { command: request.reproducerCommand, exitCode: null, timedOut: false, passed: false, stdoutDigest: "", stderrDigest: "" },
+          negativeControl: { command: request.negativeControlCommand, exitCode: null, timedOut: false, passed: false, stdoutDigest: "", stderrDigest: "" },
+          notes: [`Workspace changed after snapshot: ${integrity.changed.join(", ")}`],
+        };
+    const applied = applyValidationResult(run, validation);
     const session = await persistRunArtifacts(path.dirname(runPath), applied.run);
     console.log(`${applied.gate.status}: ${applied.gate.reason}`);
     console.log(summarizeRun(applied.run, { session }));
@@ -172,6 +247,27 @@ async function main(): Promise<void> {
     const run = mergeWorkerResult(await readJson<AuditRun>(runPath), worker);
     const session = await persistRunArtifacts(path.dirname(runPath), run);
     console.log(summarizeRun(run, { session }));
+    console.log(`Updated: ${runPath}`);
+    return;
+  }
+
+  if (command === "worker") {
+    if (!input || !secondInput) throw new Error("worker requires a run.json and task-id");
+    const runPath = path.resolve(cwd, input);
+    const run = await readJson<AuditRun>(runPath);
+    const task = run.plan?.tasks.find((candidate) => candidate.id === secondInput);
+    if (!task) throw new Error(`Task not found: ${secondInput}`);
+    if (task.phase === "VALIDATE") throw new Error("worker cannot run VALIDATE tasks; use verify/validate with an independent validator");
+    if (["COMPLETED", "BLOCKED", "DEFERRED"].includes(task.status)) throw new Error(`Task ${task.id} is ${task.status} and cannot be run without a new plan/review.`);
+    const modelConfig = await loadModelConfig(run.root, valueFlag(args, "--config", ""));
+    const registry = new ModelRegistry(modelConfig);
+    const requestedModel = valueFlag(args, "--model", "auto");
+    const selected = registry.select({ phase: task.phase, priority: task.priority, estimatedInputTokens: 0, budgetTokens: task.budgetTokens, requiredCapabilities: [task.phase, "JSON"], model: requestedModel });
+    const result = await executeWorkerTask(run, task, registry, selected.id);
+    const updated = mergeWorkerResult(run, result);
+    const session = await persistRunArtifacts(path.dirname(runPath), updated);
+    console.log(`Worker: ${result.worker}  task=${task.id}${result.error ? `  error=${result.error}` : ""}`);
+    console.log(summarizeRun(updated, { session }));
     console.log(`Updated: ${runPath}`);
     return;
   }

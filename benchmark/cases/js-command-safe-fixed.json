@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "caseId": "js-command-safe-fixed-001",
+  "split": "development",
+  "language": "javascript",
+  "file": "src/safe.js",
+  "code": "import { execFile } from 'node:child_process';\nexport function health() { return execFile('echo', ['ok']); }\n",
+  "property": "A fixed command and argument array should not create a request-controlled command injection candidate.",
+  "expected": {
+    "vulnerable": false,
+    "ruleId": "JS-COMMAND-INJECTION-001",
+    "mustNotClaimSafeFromNoMatch": true
+  },
+  "notes": ["This is a false-positive trap for the command rule."]
+}

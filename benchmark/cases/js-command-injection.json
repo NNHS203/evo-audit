@@ -6,6 +6,8 @@
   "code": "export function handler(req, res) { return exec(req.query.command); }",
   "property": "request-controlled input must not reach a shell command sink without a fixed-command boundary",
   "expected": {
+    "vulnerable": true,
+    "ruleId": "JS-COMMAND-INJECTION-001",
     "obligationKind": "SOURCE_TO_SINK",
     "minimumReportableEvidence": "T2_REPRODUCIBLE",
     "mustNotClaimSafeFromNoMatch": true

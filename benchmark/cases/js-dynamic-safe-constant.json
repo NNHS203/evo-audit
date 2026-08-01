@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "caseId": "js-dynamic-safe-constant-001",
+  "split": "development",
+  "language": "typescript",
+  "file": "src/constant.ts",
+  "code": "export function render() { const expression = '1 + 1'; return eval(expression); }\n",
+  "property": "A dynamic sink with a local constant is a lookalike that requires reachability reasoning before reporting.",
+  "expected": {
+    "vulnerable": false,
+    "ruleId": "JS-DYNAMIC-CODE-001",
+    "mustNotClaimSafeFromNoMatch": true
+  },
+  "notes": ["The current static detector is intentionally conservative; benchmark output makes this noise visible for later improvement."]
+}

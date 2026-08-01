@@ -2,8 +2,12 @@ import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { maskNonCode } from "./detectors.js";
+import { buildCodeGraph } from "./graph.js";
+import type { AuditCodeGraph } from "./graph.js";
 import type {
   AuditConfig,
+  CoverageCellStatus,
+  AuditCoverageMatrix,
   AuditContextSlice,
   AuditPlan,
   AuditPlaybook,
@@ -16,8 +20,8 @@ import type {
   SemanticDelta,
 } from "./types.js";
 
-// The graph is deliberately lexical in this first workflow layer. It is a
-// cheap context router, not a substitute for an AST/semantic analysis engine.
+// The module graph remains deliberately lexical and cheap. The AST/data-flow
+// graph is built separately and is used for evidence-bearing context routing.
 const importPatterns = [
   /\bimport\s+(?:[\s\S]*?\sfrom\s*)?["']([^"']+)["']/g,
   /\bexport\s+(?:[\s\S]*?\sfrom\s*)["']([^"']+)["']/g,
@@ -195,6 +199,51 @@ function inferEntrypoints(files: FileFingerprint[], surface: Array<{ file: strin
   return unique([...direct, ...surfaceFiles]).sort().slice(0, 64);
 }
 
+function buildCoverageMatrix(
+  files: FileFingerprint[],
+  surface: Array<{ file: string; signals: string[] }>,
+  entries: string[],
+  findings: Finding[],
+  playbook: AuditPlaybook,
+  codeGraph: AuditCodeGraph,
+): AuditCoverageMatrix {
+  const areas = new Map<string, string[]>();
+  const addArea = (area: string, areaFiles: string[]) => {
+    const inScope = areaFiles.filter((file) => files.some((candidate) => candidate.path === file));
+    if (inScope.length > 0) areas.set(area, [...new Set([...(areas.get(area) ?? []), ...inScope])].sort());
+  };
+  addArea("repository", files.map((file) => file.path));
+  addArea("entrypoints", entries);
+  addArea("auth-boundaries", surface.filter((item) => item.signals.includes("auth-boundary") || item.signals.includes("http-entrypoint")).map((item) => item.file));
+  addArea("data-and-sinks", codeGraph.nodes.filter((node) => node.kind === "SOURCE" || node.kind === "SINK").map((node) => node.file));
+
+  const cells = [...areas.entries()].flatMap(([area, areaFiles]) => playbook.rules.filter((rule) => rule.enabled).map((rule) => {
+    const relevant = findings.filter((finding) => finding.ruleId === rule.id && (area === "repository" || finding.locations.some((location) => areaFiles.includes(location.file))));
+    const validated = relevant.filter((finding) => finding.status === "VERIFIED" && finding.evidenceTier === "T2_REPRODUCIBLE");
+    const status: CoverageCellStatus = validated.length > 0 ? "VALIDATED" : relevant.length > 0 ? "CANDIDATE" : "HUNT_REQUIRED";
+    return {
+      id: `coverage:${stableDigest([area, rule.id]).slice(0, 20)}`,
+      area,
+      ruleId: rule.id,
+      files: areaFiles,
+      status,
+      evidence: relevant.map((finding) => finding.id).sort(),
+    };
+  }));
+  const unknownCells = cells.filter((cell) => (cell.status as string) === "UNKNOWN").length;
+  return {
+    schemaVersion: 1,
+    cells,
+    unknownCells,
+    digest: stableDigest(cells),
+    notes: [
+      "Coverage is measured per repository area and enabled attack rule.",
+      "HUNT_REQUIRED means the cell has not produced a candidate; it is not a clean result.",
+      "A candidate cell remains unvalidated until an independent validator records reproducible evidence.",
+    ],
+  };
+}
+
 function relatedFiles(run: AuditRun, finding: Finding, maxFiles = 8): AuditContextSlice {
   const targetFiles = unique(finding.locations.map((location) => location.file)).sort();
   const inScope = new Set(run.files.map((file) => file.path));
@@ -219,6 +268,24 @@ function relatedFiles(run: AuditRun, finding: Finding, maxFiles = 8): AuditConte
     for (const edge of edges) {
       if (edge.from === target) add(edge.to, "IMPORTS", 1);
       if (edge.to === target) add(edge.from, "IMPORTED_BY", 1);
+    }
+  }
+
+  const codeGraph = run.recon?.codeGraph;
+  if (codeGraph) {
+    const graphNodes = new Map(codeGraph.nodes.map((node) => [node.id, node]));
+    for (const edge of codeGraph.edges) {
+      const from = graphNodes.get(edge.from);
+      const to = graphNodes.get(edge.to);
+      if (!from || !to) continue;
+      if (targetFiles.includes(from.file)) add(to.file, "IMPORTS", 1);
+      if (targetFiles.includes(to.file)) add(from.file, "IMPORTED_BY", 1);
+    }
+    for (const flow of codeGraph.flows) {
+      const source = graphNodes.get(flow.sourceNodeId);
+      const sink = graphNodes.get(flow.sinkNodeId);
+      if (source && targetFiles.includes(source.file) && sink) add(sink.file, "IMPORTS", 1);
+      if (sink && targetFiles.includes(sink.file) && source) add(source.file, "IMPORTED_BY", 1);
     }
   }
 
@@ -274,6 +341,25 @@ function broadContext(run: AuditRun, maxFiles = 8): AuditContextSlice {
   };
 }
 
+function coverageContext(run: AuditRun, targetFiles: string[], maxFiles = 8): AuditContextSlice {
+  const inScope = new Set(run.files.map((file) => file.path));
+  const selected = targetFiles.filter((file) => inScope.has(file)).slice(0, maxFiles);
+  const base = broadContext(run, maxFiles);
+  const files = new Map<string, AuditContextSlice["files"][number]>();
+  for (const file of selected) files.set(file, { path: file, relation: "TARGET", distance: 0 });
+  for (const file of base.files) if (!files.has(file.path) && files.size < maxFiles) files.set(file.path, file);
+  return {
+    targetFiles: selected,
+    files: [...files.values()],
+    truncated: selected.length < targetFiles.length || base.truncated,
+    rationale: [
+      "This hunt is scoped to one uncovered area/attack-class cell.",
+      "No match in this cell is not evidence of safety; the cell remains unknown until the task completes.",
+      ...base.rationale.slice(1),
+    ],
+  };
+}
+
 function severityWeightValue(severity: Finding["severity"]): number {
   return { CRITICAL: 100, HIGH: 75, MEDIUM: 45, LOW: 20 }[severity];
 }
@@ -293,6 +379,11 @@ function taskPriority(run: AuditRun, finding: Finding, context: AuditContextSlic
 function investigationBudget(context: AuditContextSlice, severity: Finding["severity"]): number {
   const severityExtra = severity === "CRITICAL" ? 350 : severity === "HIGH" ? 200 : 0;
   return Math.min(2_400, 750 + Math.max(0, context.files.length - 1) * 300 + severityExtra);
+}
+
+function huntBudget(context: AuditContextSlice, severity: Finding["severity"]): number {
+  const severityExtra = severity === "CRITICAL" ? 150 : severity === "HIGH" ? 75 : 0;
+  return Math.min(1_400, 650 + Math.max(0, context.files.length - 1) * 90 + severityExtra);
 }
 
 function taskStatus(finding: Finding, phase: AuditTask["phase"]): AuditTask["status"] {
@@ -315,22 +406,25 @@ export async function buildAuditRecon(
   semanticDelta: SemanticDelta,
   config: AuditConfig,
   playbook: AuditPlaybook,
+  codeGraph: AuditCodeGraph = buildCodeGraph(files, contents, config.includeExtensions),
 ): Promise<AuditRecon> {
   const manifests = await existingRootFiles(root);
   const scripts = await packageScripts(root);
   const graph = buildModuleGraph(files, contents, config.includeExtensions);
   const surface = securitySurface(files, contents);
   const entries = inferEntrypoints(files, surface);
+  const coverageMatrix = buildCoverageMatrix(files, surface, entries, findings, playbook, codeGraph);
   const focusFiles = unique([
     ...(semanticDelta.basis === "BASELINE_RUN" ? [...semanticDelta.changed, ...semanticDelta.added] : []),
     ...findings.flatMap((finding) => finding.locations.map((location) => location.file)),
+    ...codeGraph.nodes.filter((node) => ["SOURCE", "SINK", "GUARD"].includes(node.kind)).map((node) => node.file),
     ...entries,
   ]).filter((file) => files.some((candidate) => candidate.path === file)).sort().slice(0, 96);
   const hasTypeScript = files.some((file) => [".ts", ".tsx"].includes(extensionWithoutDot(file.path)));
   const hasJavaScript = files.some((file) => [".js", ".jsx", ".mjs", ".cjs"].includes(extensionWithoutDot(file.path)));
   const projectKind = hasTypeScript ? "NODE_TYPESCRIPT" : hasJavaScript ? "NODE_JAVASCRIPT" : "UNKNOWN";
   const ruleInventory = playbook.rules.filter((rule) => rule.enabled).map(({ id, title, severity, evidenceRequired }) => ({ id, title, severity, evidenceRequired }));
-  const contextDigest = stableDigest({ manifests, scripts, entries, surface, graph, focusFiles, ruleInventory });
+  const contextDigest = stableDigest({ manifests, scripts, entries, surface, graph, codeGraph: codeGraph.digest, coverageMatrix: coverageMatrix.digest, focusFiles, ruleInventory });
 
   return {
     schemaVersion: 1,
@@ -341,11 +435,16 @@ export async function buildAuditRecon(
     entrypoints: entries,
     securitySurface: surface,
     moduleGraph: { nodes: files.length, edgeCount: graph.edges.length, unresolvedImports: graph.unresolvedImports, edges: graph.edges },
+    codeGraph,
+    coverageMatrix,
     focusFiles,
     contextDigest,
     notes: [
       "Recon is deterministic and does not execute package scripts or import external security knowledge.",
       "The module graph is a lexical context router; semantic reachability still requires a worker or validator.",
+      `AST code graph contains ${codeGraph.nodes.length} nodes, ${codeGraph.edges.length} edges, and ${codeGraph.flows.length} possible source-to-sink flows.`,
+      "AST flows are candidate evidence; guards, deployment reachability, and exploitability still require independent validation.",
+      `Coverage matrix contains ${coverageMatrix.cells.length} area/rule cells; ${coverageMatrix.cells.filter((cell) => cell.status === "HUNT_REQUIRED").length} require hunt coverage.`,
       "Workers should receive the task context slice before requesting broader repository context.",
     ],
   };
@@ -396,24 +495,31 @@ export function buildAuditPlan(run: AuditRun, tokenBudget = 12_000): AuditPlan {
     }
   }
 
-  const coveredRuleIds = new Set(run.findings.map((finding) => finding.ruleId));
-  for (const rule of run.recon?.ruleInventory ?? []) {
-    if (coveredRuleIds.has(rule.id)) continue;
-    const id = `hunt:${rule.id}`;
+  const matrixCells = run.recon?.coverageMatrix?.cells.filter((cell) => ["HUNT_REQUIRED", "UNKNOWN"].includes(cell.status));
+  const huntCells = matrixCells && matrixCells.length > 0
+    ? matrixCells
+    : (run.recon?.ruleInventory ?? [])
+      .filter((rule) => !run.findings.some((finding) => finding.ruleId === rule.id))
+      .map((rule) => ({ id: `legacy:${rule.id}`, area: "repository", ruleId: rule.id, files: [], status: "HUNT_REQUIRED" as const, evidence: [] }));
+  for (const cell of huntCells) {
+    const rule = run.recon?.ruleInventory.find((candidate) => candidate.id === cell.ruleId);
+    if (!rule) continue;
+    const id = `hunt:${cell.id}`;
     tasks.push({
       id,
       phase: "HUNT",
       findingId: null,
       obligationId: null,
       ruleId: rule.id,
-      title: `Hunt beyond static matches: ${rule.title}`,
-      priority: severityWeightValue(rule.severity) + 15,
+      title: `Hunt uncovered ${cell.area}: ${rule.title}`,
+      priority: severityWeightValue(rule.severity) + (cell.area === "repository" ? 10 : 25),
       status: previousStatuses.get(id) === "COMPLETED" ? "COMPLETED" : "PENDING",
       budgetTokens: 0,
-      context: broadContext(run),
+      context: cell.area === "repository" ? broadContext(run) : coverageContext(run, cell.files),
       dependsOn: [],
+      coverageCellId: cell.id,
       rationale: [
-        "The deterministic pass found no candidate for this rule; absence of a match is not evidence of safety.",
+        "This area/attack-class cell has no candidate yet; absence of a match is not evidence of safety.",
         "Look for equivalent sinks, helper indirection, alternate entrypoints, and guard bypasses.",
       ],
     });
@@ -425,7 +531,9 @@ export function buildAuditPlan(run: AuditRun, tokenBudget = 12_000): AuditPlan {
   for (const task of tasks.filter((candidate) => ["INVESTIGATE", "HUNT"].includes(candidate.phase) && candidate.status === "PENDING")) {
     const finding = task.findingId ? run.findings.find((candidate) => candidate.id === task.findingId) : undefined;
     const rule = task.ruleId ? run.recon?.ruleInventory.find((candidate) => candidate.id === task.ruleId) : undefined;
-    const estimate = investigationBudget(task.context, finding?.severity ?? rule?.severity ?? "MEDIUM");
+    const estimate = task.phase === "HUNT"
+      ? huntBudget(task.context, rule?.severity ?? "MEDIUM")
+      : investigationBudget(task.context, finding?.severity ?? rule?.severity ?? "MEDIUM");
     if (remaining < 500) {
       task.status = "DEFERRED";
       task.rationale.push("Deferred because the configured worker token budget is exhausted.");
@@ -451,6 +559,7 @@ export function buildAuditPlan(run: AuditRun, tokenBudget = 12_000): AuditPlan {
     tasks,
     notes: [
       "Token allocation applies to model investigation tasks; validator resource limits are tracked by the validation contract.",
+      "HUNT tasks use a smaller exploratory budget; INVESTIGATE tasks receive more context only after a concrete candidate exists.",
       "A WAITING validation task is not evidence of safety; it has not run yet.",
       "If context is insufficient, expand along graph edges before sending the entire repository to a worker.",
     ],

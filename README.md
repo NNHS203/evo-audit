@@ -51,6 +51,9 @@ evo-audit verify ./audit-runs/<run>/run.json <finding-id> \
 # Apply a result produced by an independent validator.
 evo-audit validate ./audit-runs/<run>/run.json ./validation-result.json
 
+# Or execute the request in a Docker/Podman sandbox (never on the host).
+evo-audit validate-run ./audit-runs/<run>/run.json ./validation-request.json
+
 # Track root causes across scans, without treating incomplete coverage as clean.
 evo-audit compare ./before/run.json ./after/run.json
 
@@ -98,9 +101,10 @@ Workers should consume one plan task at a time:
 `STATIC_ONLY`, `PARTIAL_WORKER`, and `VALIDATED` describe semantic coverage;
 `PENDING`, `WAITING`, and `DEFERRED` are workflow states, not security
 verdicts. A deferred task means the worker budget was exhausted; it does not
-mean the code was reviewed or safe. The graph currently provides lexical
-module context only. It is intentionally not presented as semantic reachability
-until a TypeScript/JavaScript AST and data-flow layer is added.
+mean the code was reviewed or safe. Recon now also contains a TypeScript/
+JavaScript AST graph with local source/sink flow facts. Those facts improve
+candidate discovery and context selection but remain possible paths until an
+independent validator proves reachability and impact.
 
 ## Evidence contract
 
@@ -118,6 +122,10 @@ For `VERIFIED`, the validator must provide:
 
 If the workspace changes after the run, validation fails closed. An empty
 finding list or incomplete coverage is never represented as proof of safety.
+`validate-run` uses a read-only source mount, disabled network, dropped Linux
+capabilities, no-new-privileges, a PID/memory/CPU limit, and a writable
+no-exec `/tmp`. If Docker/Podman is unavailable, the result is `BLOCKED`; the
+command is never executed directly on the developer host.
 
 ## Frontier worker boundary
 
@@ -137,13 +145,22 @@ proof by itself.
 Worker claims are deliberately downgraded to hypotheses/supporting evidence.
 The validator-owned ledger is the only path to `VERIFIED`.
 
+## Bring your own model
+
+Models can be loaded through an API-key environment variable or a PKCE OAuth
+flow. Configure `audit.models.json`, inspect credential state with
+`evo-audit models .`, and run `evo-audit auth . <model-id>` for a configured
+OAuth provider. `auto` routing is capability- and budget-aware, but model
+selection never replaces source evidence or independent validation. See
+[`docs/MODELS.md`](docs/MODELS.md).
+
 ## Research direction
 
-The next depth layer is a code graph for TypeScript/JavaScript: imports,
-symbols, calls, source-to-sink flows, authorization boundaries, sanitizers, and
-tests. Workers should receive compact graph slices instead of entire
-repositories. Playbook changes should be evaluated on held-out cases before
-they are accepted.
+The next depth layer is interprocedural graph expansion: resolved symbols,
+cross-function data-flow, authorization boundaries, sanitizers, tests, and
+framework entrypoint adapters. Workers already receive compact AST graph
+slices instead of entire repositories. Playbook changes should be evaluated on
+held-out cases before they are accepted.
 
 The benchmark contract is documented in [`benchmark/README.md`](benchmark/README.md).
 The workflow rationale and research references are documented in

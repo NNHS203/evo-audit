@@ -240,12 +240,17 @@ export function mergeWorkerResult(runInput: AuditRun, result: AuditWorkerResult)
   if (result.taskId) {
     const task = run.plan.tasks.find((candidate) => candidate.id === result.taskId);
     if (task) {
-      const reportedTokens = nonNegativeNumber(reported?.inputTokens, 0) + nonNegativeNumber(reported?.outputTokens, 0);
-      if (task.budgetTokens > 0 && reportedTokens > task.budgetTokens) {
+      if (result.error) {
         task.status = "BLOCKED";
-        run.notes = uniqueStrings([...run.notes, `Worker ${result.worker} exceeded task budget: ${reportedTokens} > ${task.budgetTokens} tokens.`]);
+        run.notes = uniqueStrings([...run.notes, `Worker ${result.worker} failed task ${result.taskId}: ${result.error}`]);
       } else {
-        task.status = "COMPLETED";
+        const reportedTokens = nonNegativeNumber(reported?.inputTokens, 0) + nonNegativeNumber(reported?.outputTokens, 0);
+        if (task.budgetTokens > 0 && reportedTokens > task.budgetTokens) {
+          task.status = "BLOCKED";
+          run.notes = uniqueStrings([...run.notes, `Worker ${result.worker} exceeded task budget: ${reportedTokens} > ${task.budgetTokens} tokens.`]);
+        } else {
+          task.status = "COMPLETED";
+        }
       }
     }
   }

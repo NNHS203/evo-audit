@@ -4,7 +4,9 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { defaultConfig, defaultPlaybook } from "./playbook.js";
 import { detectFindings } from "./detectors.js";
+import { buildCodeGraph, detectGraphFindings } from "./graph.js";
 import { formatTokenUsage, recordSessionUsage, tokenUsageTotals } from "./usage.js";
+import { defaultModelConfig } from "./models.js";
 import { buildAuditPlan, buildAuditRecon, planSummary } from "./workflow.js";
 import type {
   AuditConfig,
@@ -41,6 +43,8 @@ export async function initWorkspace(root: string): Promise<void> {
   const playbookPath = path.join(root, defaultConfig.playbook);
   if (!(await pathExists(configPath))) await writeJson(configPath, defaultConfig);
   if (!(await pathExists(playbookPath))) await writeJson(playbookPath, defaultPlaybook);
+  const modelConfigPath = path.join(root, "audit.models.json");
+  if (!(await pathExists(modelConfigPath))) await writeJson(modelConfigPath, defaultModelConfig());
 }
 
 function shouldIgnore(relativePath: string, config: AuditConfig): boolean {
@@ -167,6 +171,10 @@ export async function runAudit(rootInput: string, options: { output: string; str
     ? allFindings.filter((finding) => playbook.evidencePolicy.reportableTiers.includes(finding.evidenceTier) && finding.status === "VERIFIED")
     : allFindings;
   const semanticDelta = computeSemanticDelta(files, options.baseline);
+  const codeGraph = buildCodeGraph(files, sourceContents, config.includeExtensions);
+  const graphResult = detectGraphFindings(codeGraph, playbook, runId, allFindings);
+  allFindings.push(...graphResult.findings);
+  allObligations.push(...graphResult.obligations);
   const revision = gitValue(root, ["rev-parse", "HEAD"]);
   const completedAt = new Date().toISOString();
   const snapshot = {
@@ -175,7 +183,7 @@ export async function runAudit(rootInput: string, options: { output: string; str
     capturedAt: completedAt,
     files,
   };
-  const recon = await buildAuditRecon(root, files, sourceContents, allFindings, semanticDelta, config, playbook);
+  const recon = await buildAuditRecon(root, files, sourceContents, allFindings, semanticDelta, config, playbook, codeGraph);
   const run: AuditRun = {
     schemaVersion: 1,
     runId,

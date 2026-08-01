@@ -33,3 +33,20 @@ The intended research loop is: run a frozen playbook on train cases, propose a
 reviewable playbook revision, evaluate it on development cases, then report
 once on holdout. This makes improvements in the audit procedure measurable
 instead of conflating them with a larger model or a longer prompt.
+
+## Local runner
+
+Run the deterministic baseline over the checked-in cases:
+
+```bash
+evo-audit benchmark ./benchmark/cases
+evo-audit benchmark ./benchmark/cases --split development --json
+```
+
+The runner creates an isolated temporary workspace for each case, records the
+candidate result, and removes that workspace after the case. It reports
+candidate recall/precision, false-positive rate on explicitly labeled safe
+traps, unknown-coverage rate, and tokens per case. These are discovery metrics;
+they are not a claim of real-world vulnerability recall. A later model-backed
+runner must preserve the same case IDs and add validator evidence before
+reporting validated metrics.

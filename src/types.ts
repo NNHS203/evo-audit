@@ -25,6 +25,59 @@ export interface AuditConfig {
   tokenBudget: number;
 }
 
+export type ModelTransport = "OPENAI_COMPATIBLE" | "ANTHROPIC";
+export type ModelAuthMethod = "API_KEY" | "OAUTH" | "NONE";
+export type ModelCapability = "HUNT" | "INVESTIGATE" | "VALIDATE" | "JSON";
+
+export interface OAuthModelConfig {
+  authorizationUrl: string;
+  tokenUrl: string;
+  clientId: string;
+  scopes: string[];
+  redirectUri?: string;
+  accessTokenEnv?: string;
+  tokenFile?: string;
+  clientSecretEnv?: string;
+  extraAuthorizationParams?: Record<string, string>;
+}
+
+export interface ModelAuthConfig {
+  method: ModelAuthMethod;
+  apiKeyEnv?: string;
+  accessTokenEnv?: string;
+  tokenFile?: string;
+  oauth?: OAuthModelConfig;
+}
+
+export interface ModelDefinition {
+  id: string;
+  transport: ModelTransport;
+  model: string;
+  baseUrl: string;
+  auth: ModelAuthConfig;
+  qualityTier: number;
+  capabilities: ModelCapability[];
+  maxContextTokens?: number;
+  pricing?: {
+    inputPerMillionUsd: number;
+    outputPerMillionUsd: number;
+  };
+  enabled?: boolean;
+}
+
+export interface AutoModelPolicy {
+  enabled: boolean;
+  preferred?: string[];
+  minimumQualityTier?: number;
+  maxCostPerRunUsd?: number;
+}
+
+export interface AuditModelConfig {
+  schemaVersion: 1;
+  models: ModelDefinition[];
+  auto: AutoModelPolicy;
+}
+
 export interface PlaybookRule {
   id: string;
   title: string;
@@ -142,6 +195,8 @@ export interface AuditRecon {
     unresolvedImports: number;
     edges: ModuleGraphEdge[];
   };
+  codeGraph?: import("./graph.js").AuditCodeGraph;
+  coverageMatrix?: AuditCoverageMatrix;
   focusFiles: string[];
   contextDigest: string;
   notes: string[];
@@ -158,6 +213,25 @@ export interface AuditContextSlice {
   rationale: string[];
 }
 
+export type CoverageCellStatus = "HUNT_REQUIRED" | "CANDIDATE" | "VALIDATED" | "UNKNOWN";
+
+export interface AuditCoverageCell {
+  id: string;
+  area: string;
+  ruleId: string;
+  files: string[];
+  status: CoverageCellStatus;
+  evidence: string[];
+}
+
+export interface AuditCoverageMatrix {
+  schemaVersion: 1;
+  cells: AuditCoverageCell[];
+  unknownCells: number;
+  digest: string;
+  notes: string[];
+}
+
 export interface AuditTask {
   id: string;
   phase: "HUNT" | "INVESTIGATE" | "VALIDATE";
@@ -171,6 +245,7 @@ export interface AuditTask {
   context: AuditContextSlice;
   dependsOn: string[];
   rationale: string[];
+  coverageCellId?: string;
 }
 
 export interface AuditPlan {
@@ -248,6 +323,7 @@ export interface AuditWorkerContext {
 export interface AuditWorkerResult {
   worker: string;
   taskId?: string;
+  error?: string;
   findings: Array<
     Partial<Finding> & {
       ruleId: string;
@@ -271,6 +347,7 @@ export interface ValidationRequest {
   negativeControlCommand: string;
   timeoutMs: number;
   sandboxProfile: "READ_ONLY_NO_NETWORK" | "READ_ONLY_ALLOWLIST";
+  image?: string;
 }
 
 export interface ValidationCommandResult {

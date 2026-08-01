@@ -29,8 +29,10 @@
     "benchmark",
     "docs"
   ],
-  "devDependencies": {
-    "@types/node": "^24.0.0",
+  "dependencies": {
     "typescript": "^5.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0"
   }
 }

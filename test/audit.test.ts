@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -12,6 +13,9 @@ import { toSarif } from "../src/sarif.js";
 import type { AuditRun } from "../src/types.js";
 import { applyValidationResult, assertWorkspaceMatchesSnapshot, validateResultAgainstRun } from "../src/validator.js";
 import { mergeWorkerResult } from "../src/workers.js";
+import { loadModelConfig, ModelRegistry } from "../src/models.js";
+import { workerResultFromCompletion } from "../src/worker-runner.js";
+import { runValidationRequest } from "../src/validation-runner.js";
 
 test("candidate detection masks fixtures, comments, and descriptions but keeps code", () => {
   const source = [
@@ -98,6 +102,9 @@ test("recon builds bounded graph context and the plan enforces the worker token 
   assert.equal(run.plan?.tasks.some((task) => task.phase === "INVESTIGATE" && task.context.files.some((file) => file.path === "src/route.ts")), true);
   assert.equal(run.plan?.tasks.some((task) => task.phase === "VALIDATE" && task.status === "WAITING"), true);
   assert.equal(run.plan?.tasks.some((task) => task.phase === "HUNT" && task.findingId === null), true);
+  assert.equal((run.recon?.coverageMatrix?.cells.length ?? 0) > 0, true);
+  assert.equal(run.recon?.coverageMatrix?.cells.some((cell) => cell.status === "HUNT_REQUIRED"), true);
+  assert.equal(run.plan?.tasks.some((task) => task.phase === "HUNT" && task.coverageCellId), true);
 
   const overBudget = mergeWorkerResult(run, {
     worker: "over-budget-worker",
@@ -106,6 +113,140 @@ test("recon builds bounded graph context and the plan enforces the worker token 
     tokenAccounting: { inputTokens: 901, outputTokens: 1 },
   });
   assert.equal(overBudget.plan?.tasks.find((task) => task.id === `investigate:${run.findings[0].id}`)?.status, "BLOCKED");
+});
+
+test("AST graph finds an indirect source-to-command-sink path without flagging a fixed command", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-graph-flow-"));
+  await initWorkspace(root);
+  await writeFile(path.join(root, "indirect.ts"), [
+    "import { exec } from 'node:child_process';",
+    "export function run(req) {",
+    "  const command = req.query.command;",
+    "  return exec(command);",
+    "}",
+  ].join("\n"), "utf8");
+  await writeFile(path.join(root, "fixed.ts"), "import { exec } from 'node:child_process';\nexport function run() { return exec('echo fixed'); }\n", "utf8");
+
+  const { run } = await runAudit(root, { output: path.join(root, "runs") });
+  const flow = run.recon?.codeGraph?.flows ?? [];
+  assert.equal(flow.length, 1);
+  assert.equal(run.recon?.codeGraph?.stats.flows, 1);
+  const graphFinding = run.findings.find((finding) => finding.ruleId === "JS-COMMAND-INJECTION-001");
+  assert.ok(graphFinding);
+  assert.equal(graphFinding.locations.length, 2);
+  assert.equal(graphFinding.locations[0].file, "indirect.ts");
+  assert.equal(graphFinding.locations[1].file, "indirect.ts");
+  assert.match(graphFinding.evidence[0].title, /AST data-flow/i);
+});
+
+test("model registry loads API/OAuth references and routes auto tasks without exposing secrets", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-models-"));
+  const keyName = "EVO_AUDIT_TEST_PROVIDER_KEY";
+  process.env[keyName] = "test-secret";
+  await writeFile(path.join(root, "audit.models.json"), JSON.stringify({
+    schemaVersion: 1,
+    auto: { enabled: true, preferred: ["frontier"], minimumQualityTier: 2 },
+    models: [
+      {
+        id: "frontier",
+        transport: "OPENAI_COMPATIBLE",
+        model: "frontier-test",
+        baseUrl: "https://example.invalid/v1",
+        auth: { method: "API_KEY", apiKeyEnv: keyName },
+        qualityTier: 5,
+        capabilities: ["HUNT", "INVESTIGATE", "VALIDATE", "JSON"],
+      },
+      {
+        id: "oauth",
+        transport: "OPENAI_COMPATIBLE",
+        model: "oauth-test",
+        baseUrl: "https://example.invalid/v1",
+        auth: { method: "OAUTH", tokenFile: path.join(root, "missing-token.json"), oauth: { authorizationUrl: "https://example.invalid/authorize", tokenUrl: "https://example.invalid/token", clientId: "client", scopes: [] } },
+        qualityTier: 4,
+        capabilities: ["HUNT", "INVESTIGATE", "JSON"],
+      },
+    ],
+  }, null, 2), "utf8");
+  try {
+    const config = await loadModelConfig(root);
+    const registry = new ModelRegistry(config);
+    const statuses = await registry.statuses();
+    assert.equal(statuses.find((model) => model.id === "frontier")?.credentialAvailable, true);
+    assert.equal(statuses.find((model) => model.id === "oauth")?.credentialAvailable, false);
+    assert.equal(registry.select({ phase: "HUNT", priority: 100, estimatedInputTokens: 500, budgetTokens: 4000 }).id, "frontier");
+  } finally {
+    delete process.env[keyName];
+  }
+
+  await writeFile(path.join(root, "invalid.models.json"), JSON.stringify({
+    schemaVersion: 1,
+    auto: { enabled: true },
+    models: [{ id: "unsafe", transport: "OPENAI_COMPATIBLE", model: "x", baseUrl: "https://example.invalid", auth: { method: "API_KEY", apiKey: "raw-secret" }, qualityTier: 1, capabilities: ["HUNT", "JSON"] }],
+  }), "utf8");
+  await assert.rejects(() => loadModelConfig(root, "invalid.models.json"), /raw credential/i);
+});
+
+test("worker protocol rejects malformed model JSON and blocks the task", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-worker-protocol-"));
+  await initWorkspace(root);
+  await writeFile(path.join(root, "safe.ts"), "export const safe = true;\n", "utf8");
+  const { run } = await runAudit(root, { output: path.join(root, "runs") });
+  const task = run.plan?.tasks.find((candidate) => candidate.phase === "HUNT" && candidate.status === "PENDING");
+  assert.ok(task);
+  const result = workerResultFromCompletion({
+    requestId: "malformed-1",
+    modelId: "test-model",
+    providerModel: "test",
+    text: "not json",
+    usage: { inputTokens: 20, outputTokens: 4, cachedTokens: 0, estimatedCostUsd: 0, source: "WORKER_REPORTED" },
+  }, task);
+  assert.match(result.error ?? "", /valid JSON/i);
+  const blocked = mergeWorkerResult(run, result);
+  assert.equal(blocked.plan?.tasks.find((candidate) => candidate.id === task.id)?.status, "BLOCKED");
+});
+
+test("OpenAI-compatible provider normalizes completion text and token usage", async () => {
+  const server = createServer((_request, response) => {
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ id: "provider-test-1", choices: [{ message: { content: "{\"findings\":[]}" }, finish_reason: "stop" }], usage: { prompt_tokens: 40, completion_tokens: 12, prompt_tokens_details: { cached_tokens: 8 } } }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  try {
+    const registry = new ModelRegistry({
+      schemaVersion: 1,
+      auto: { enabled: true, preferred: ["local"], minimumQualityTier: 1 },
+      models: [{ id: "local", transport: "OPENAI_COMPATIBLE", model: "test", baseUrl: `http://127.0.0.1:${address.port}`, auth: { method: "NONE" }, qualityTier: 3, capabilities: ["HUNT", "JSON"] }],
+    });
+    const response = await registry.complete({ phase: "HUNT", priority: 80, estimatedInputTokens: 20, budgetTokens: 400, messages: [{ role: "user", content: "test" }] });
+    assert.equal(response.text, "{\"findings\":[]}");
+    assert.equal(response.requestId, "provider-test-1");
+    assert.deepEqual(response.usage, { inputTokens: 40, outputTokens: 12, cachedTokens: 8, estimatedCostUsd: 0, source: "WORKER_REPORTED" });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("validation runner fails closed for an unsupported sandbox profile", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-validation-runner-"));
+  await initWorkspace(root);
+  await writeFile(path.join(root, "safe.ts"), "export const safe = true;\n", "utf8");
+  const { run } = await runAudit(root, { output: path.join(root, "runs") });
+  const result = await runValidationRequest(run, {
+    schemaVersion: 1,
+    requestId: "invalid-sandbox-1",
+    runId: run.runId,
+    findingId: "missing",
+    baseTreeDigest: run.snapshot.treeDigest,
+    targetFiles: [],
+    reproducerCommand: "echo should-not-run",
+    negativeControlCommand: "echo should-not-run",
+    timeoutMs: 1000,
+    sandboxProfile: "HOST_UNSAFE" as never,
+  }, "test-validator");
+  assert.equal(result.outcome, "HARNESS_FAILED");
+  assert.match(result.notes?.[0] ?? "", /Unsupported sandbox/i);
 });
 
 test("strict mode does not promote static candidates", async () => {

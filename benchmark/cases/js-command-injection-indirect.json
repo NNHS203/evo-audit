@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "caseId": "js-command-injection-indirect-001",
+  "split": "development",
+  "language": "typescript",
+  "file": "src/handler.ts",
+  "code": "import { exec } from 'node:child_process';\nexport function handler(req) {\n  const command = req.query.command;\n  return exec(command);\n}\n",
+  "property": "A source-to-sink path must remain visible when the attacker-controlled value crosses a local variable.",
+  "expected": {
+    "vulnerable": true,
+    "ruleId": "JS-COMMAND-INJECTION-001",
+    "obligationKind": "SOURCE_TO_SINK",
+    "minimumReportableEvidence": "T2_REPRODUCIBLE",
+    "mustNotClaimSafeFromNoMatch": true
+  },
+  "negativeControls": ["exec('echo fixed')"],
+  "notes": ["The deterministic AST graph should discover this even when the lexical detector does not."]
+}

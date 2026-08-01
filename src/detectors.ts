@@ -110,7 +110,11 @@ function matchesRule(rule: PlaybookRule, relativePath: string): boolean {
 }
 
 function findMatch(rule: PlaybookRule, line: string): Omit<DetectorMatch, "rule" | "line" | "column" | "snippet"> | null {
-  if (rule.id === "JS-DYNAMIC-CODE-001" && /\beval\s*\(|\bnew\s+Function\s*\(/.test(line)) {
+  if (
+    rule.id === "JS-DYNAMIC-CODE-001" &&
+    /\beval\s*\(|\bnew\s+Function\s*\(/.test(line) &&
+    new RegExp(requestInput, "i").test(line)
+  ) {
     return {
       rootCause: "A dynamic code execution boundary is present.",
       impact: "If attacker-controlled data reaches this call, arbitrary code execution may be possible.",
