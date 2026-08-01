@@ -101,6 +101,14 @@ deduplication. DjanGoat's remaining single false positive is a published
 ground-truth location mismatch for the pay-record deletion described at the
 actual sink line; it is preserved in the score rather than silently corrected.
 
+The current-head, same-label external comparison is checked in as [Damn
+Vulnerable Flask vs Bandit 1.9.4](../benchmark/results/realvuln-damn-vulnerable-flask-current-bandit-compare-20260801.json).
+On that one pinned repository, Evo Audit candidate precision/recall/FPR/F3 were
+`0.882 / 1.000 / 0.333 / 0.987`, while Bandit 1.9.4 measured
+`0.200 / 0.067 / 0.500 / 0.071`. This is an observed one-repository comparison,
+not a universal claim; both reportable recalls remain `0` without independent
+runtime validation.
+
 The first full-manifest run is checked in separately as an observed corpus
 baseline: [RealVuln v2 aggregate](../benchmark/results/realvuln-v2-aggregate-20260801.json).
 It completed 62/66 manifest entries and blocked four entries whose published

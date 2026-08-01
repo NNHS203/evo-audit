@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "status": "OBSERVED_HOLDOUT_COMPARISON",
+  "benchmark": "RealVuln",
+  "benchmarkVersion": "2.0.0",
+  "benchmarkRepositoryRevision": "98872da5caa25eb4d4bc7d5b93e10e08148a2049",
+  "repository": {
+    "id": "realvuln-damn-vulnerable-flask-application",
+    "commit": "55f63201c85190e760a8fa34a580a9bf918dbf36",
+    "language": "python",
+    "framework": "flask"
+  },
+  "groundTruth": {
+    "labels": 19,
+    "vulnerableLabels": 15,
+    "safeLabels": 4,
+    "sha256": "800602b47d2ac838a212212c9db7b7e284c2a58df27dd1b7a099d26f1db31468"
+  },
+  "auditedTreeDigest": "9e0c7b0acbf8769ef50da9293e21953774469f62b285f959d4d86d61f8ba2a85",
+  "scoring": {
+    "lineTolerance": 10,
+    "reportableRequiresIndependentValidator": true
+  },
+  "scanners": {
+    "evo-audit": {
+      "scannerCommit": "ffa38f7cd2ca33b923771e7182f85b4ca067aedc",
+      "playbook": { "id": "evo-audit-default", "version": "0.1.1" },
+      "runId": "9162ff0b-334c-407b-a1de-026e1b4facf7",
+      "artifactSha256": "ef145d7d0b41d0a6ca17fe949b76176b4d80e38fb14368207a44733d8675a417",
+      "findings": 17,
+      "candidate": {
+        "truePositive": 15,
+        "falsePositive": 2,
+        "falseNegative": 0,
+        "trueNegative": 4,
+        "precision": 0.8823529411764706,
+        "recall": 1,
+        "falsePositiveRate": 0.3333333333333333,
+        "f3": 0.986842105263158
+      },
+      "reportable": {
+        "truePositive": 0,
+        "falsePositive": 0,
+        "falseNegative": 15,
+        "trueNegative": 4,
+        "recall": 0
+      }
+    },
+    "bandit": {
+      "version": "1.9.4",
+      "command": "python -m bandit -r <pinned-checkout> -f json -o bandit.json --exit-zero",
+      "artifactSha256": "49cf80b41c8fc2214a6b0beaff3edca9470314c189e751b14482ebf09462979e",
+      "findings": 5,
+      "candidate": {
+        "truePositive": 1,
+        "falsePositive": 4,
+        "falseNegative": 14,
+        "trueNegative": 4,
+        "precision": 0.2,
+        "recall": 0.06666666666666667,
+        "falsePositiveRate": 0.5,
+        "f3": 0.07142857142857142
+      },
+      "reportable": {
+        "truePositive": 0,
+        "falsePositive": 0,
+        "falseNegative": 15,
+        "trueNegative": 4,
+        "recall": 0
+      }
+    }
+  },
+  "notes": [
+    "Both scanners were scored by evo-audit compare-scores against the same pinned RealVuln ground truth, commit, line tolerance, and one-to-one matcher.",
+    "The current Evo Audit candidate channel exceeds Bandit 1.9.4 on this pinned repository for recall (1.000 vs 0.067), precision (0.882 vs 0.200), FPR (0.333 vs 0.500), and F3 (0.987 vs 0.071).",
+    "This is one observed repository, not a benchmark-wide or universal superiority claim. Candidate findings are not verified vulnerabilities; both reportable recalls are zero because no independent runtime validator was supplied.",
+    "Artifact paths were local temporary paths during execution and are intentionally redacted; artifact hashes, run identity, snapshot digest, source commit, and tool version remain for provenance."
+  ]
+}
