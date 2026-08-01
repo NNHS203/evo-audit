@@ -106,6 +106,8 @@ evo-audit score ./ground-truth.json ./audit-runs/<run>/run.json --format run
 evo-audit score ./ground-truth.json ./semgrep.sarif --format sarif
 evo-audit score ./realvuln-ground-truth.json ./scanner.sarif \
   --format sarif --ground-truth-format realvuln
+evo-audit score ./realvuln-ground-truth.json ./bandit.json \
+  --format bandit --root ./pinned-project --ground-truth-format realvuln
 # Checked-in smoke example:
 evo-audit score ./benchmark/ground-truth.example.json \
   ./benchmark/scanner.example.sarif --format sarif

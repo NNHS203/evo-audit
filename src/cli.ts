@@ -12,7 +12,7 @@ import { authorizeModel, loadModelConfig, ModelRegistry } from "./models.js";
 import { executeWorkerTask } from "./worker-runner.js";
 import { evaluateBenchmark, runBenchmark } from "./benchmark.js";
 import { buildRevalidationPlan } from "./revalidation.js";
-import { groundTruthLabelsFromValue, scannerFindingsFromRun, scannerFindingsFromSarif, scoreScannerFindings, type GroundTruthFormat } from "./scoring.js";
+import { groundTruthLabelsFromValue, scannerFindingsFromBandit, scannerFindingsFromRun, scannerFindingsFromSarif, scoreScannerFindings, type GroundTruthFormat } from "./scoring.js";
 import { runRealVuln } from "./realvuln.js";
 import type { AuditRun, AuditWorkerResult, ValidationResult } from "./types.js";
 
@@ -32,7 +32,7 @@ Commands:
   validate-run <run.json> <request.json> Execute a request in a container sandbox
   compare <before.json> <after.json> Compare findings by root cause across runs
   revalidate <before.json> <after.json> Build a fix/regression validation plan
-  score <ground-truth.json> <run-or-sarif> Score normalized scanner output
+  score <ground-truth.json> <run/sarif/bandit> Score normalized scanner output
   plan <run.json> [--json]            Show prioritized investigation/validation tasks
   status <run.json>                   Show coverage and pending obligations
   resume <run.json> [--output FILE]   Write a resumable pending-work plan
@@ -138,8 +138,10 @@ async function main(): Promise<void> {
     const requestedFormat = valueFlag(args, "--format", "auto");
     const sourceRecord = source && typeof source === "object" ? source as Record<string, unknown> : {};
     const isRun = requestedFormat === "run" || (requestedFormat === "auto" && typeof sourceRecord.runId === "string" && Array.isArray(sourceRecord.findings));
-    const scanner = valueFlag(args, "--scanner", isRun ? "evo-audit" : "sarif-scanner");
-    const findings = isRun ? scannerFindingsFromRun(source as AuditRun, scanner) : scannerFindingsFromSarif(source, scanner);
+    const isBandit = requestedFormat === "bandit";
+    const scanner = valueFlag(args, "--scanner", isRun ? "evo-audit" : isBandit ? "bandit" : "sarif-scanner");
+    const scannerRoot = valueFlag(args, "--root", "") || undefined;
+    const findings = isRun ? scannerFindingsFromRun(source as AuditRun, scanner) : isBandit ? scannerFindingsFromBandit(source, scanner, scannerRoot) : scannerFindingsFromSarif(source, scanner, scannerRoot);
     const run = isRun ? source as AuditRun : undefined;
     const score = scoreScannerFindings(findings, labels, {
       scanner,

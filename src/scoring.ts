@@ -1,4 +1,5 @@
 import type { AuditRun, Finding } from "./types.js";
+import path from "node:path";
 
 export interface GroundTruthLabel {
   id: string;
@@ -124,6 +125,12 @@ function normalizedFile(value: string): string {
     .replace(/\\/g, "/")
     .replace(/^\.\//, "")
     .replace(/^\/+/, "");
+}
+
+function relativeScannerFile(value: string, root?: string): string {
+  if (!root || !path.isAbsolute(value)) return value;
+  const relative = path.relative(path.resolve(root), path.resolve(value)).split(path.sep).join("/");
+  return relative && !relative.startsWith("../") && relative !== ".." ? relative : value;
 }
 
 function nonNegative(value: number | undefined): number {
@@ -291,7 +298,7 @@ function numberValue(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-export function scannerFindingsFromSarif(value: unknown, scanner = "sarif-scanner"): NormalizedScannerFinding[] {
+export function scannerFindingsFromSarif(value: unknown, scanner = "sarif-scanner", rootPath?: string): NormalizedScannerFinding[] {
   const root = objectRecord(value);
   const runs = Array.isArray(root?.runs) ? root.runs : [];
   const findings: NormalizedScannerFinding[] = [];
@@ -313,7 +320,7 @@ export function scannerFindingsFromSarif(value: unknown, scanner = "sarif-scanne
         const file = stringValue(artifact?.uri);
         const startLine = numberValue(region?.startLine);
         if (!file || !startLine) continue;
-        locations.push({ file, startLine, endLine: numberValue(region?.endLine) ?? startLine });
+        locations.push({ file: relativeScannerFile(file, rootPath), startLine, endLine: numberValue(region?.endLine) ?? startLine });
       }
       if (locations.length === 0) continue;
       const properties = objectRecord(item.properties);
@@ -331,4 +338,29 @@ export function scannerFindingsFromSarif(value: unknown, scanner = "sarif-scanne
     }
   }
   return findings;
+}
+
+export function scannerFindingsFromBandit(value: unknown, scanner = "bandit", rootPath?: string): NormalizedScannerFinding[] {
+  const root = objectRecord(value);
+  const results = Array.isArray(root?.results) ? root.results : [];
+  return results.flatMap((result, index) => {
+    const item = objectRecord(result);
+    if (!item) return [];
+    const file = stringValue(item.filename);
+    const line = numberValue(item.line_number);
+    if (!file || line === undefined) return [];
+    const cwe = objectRecord(item.issue_cwe);
+    const cweId = numberValue(cwe?.id);
+    const testId = stringValue(item.test_id) ?? "UNKNOWN-RULE";
+    const lineRange = Array.isArray(item.line_range) ? numberValue(item.line_range[0]) : undefined;
+    return [{
+      id: stringValue(item.test_id) ? `${scanner}:${item.test_id}:${file}:${line}:${index}` : `${scanner}:${index}`,
+      scanner,
+      ruleId: testId,
+      ruleIds: [testId, ...(cweId === undefined ? [] : [`CWE-${cweId}`])],
+      locations: [{ file: relativeScannerFile(file, rootPath), startLine: line, endLine: lineRange ?? line }],
+      reportable: false,
+      unsupportedClaim: false,
+    }];
+  });
 }

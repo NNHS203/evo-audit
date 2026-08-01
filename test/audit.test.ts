@@ -20,7 +20,7 @@ import { runValidationRequest } from "../src/validation-runner.js";
 import { deduplicateRun } from "../src/dedup.js";
 import { buildRevalidationPlan } from "../src/revalidation.js";
 import { evaluateBenchmark, runBenchmark, type BenchmarkReport } from "../src/benchmark.js";
-import { groundTruthLabelsFromValue, scannerFindingsFromSarif, scoreScannerFindings } from "../src/scoring.js";
+import { groundTruthLabelsFromValue, scannerFindingsFromBandit, scannerFindingsFromSarif, scoreScannerFindings } from "../src/scoring.js";
 
 test("candidate detection masks fixtures, comments, and descriptions but keeps code", () => {
   const source = [
@@ -713,6 +713,9 @@ test("scanner scoring separates candidate and evidence-gated reportable performa
   const alternateLocation = groundTruthLabelsFromValue({ findings: [{ id: "rv-2", is_vulnerable: true, file: "src/app.ts", location: { start_line: 10 }, acceptable_locations: [{ file: "src/model.ts", start_line: 26, end_line: 30 }] }] }, "REALVULN");
   const alternateFinding = scannerFindingsFromSarif({ version: "2.1.0", runs: [{ results: [{ ruleId: "RULE-2", locations: [{ physicalLocation: { artifactLocation: { uri: "src/model.ts" }, region: { startLine: 27 } } }], properties: { reportable: true } }] }] });
   assert.equal(scoreScannerFindings(alternateFinding, alternateLocation).candidate.truePositive, 1);
+  const banditFindings = scannerFindingsFromBandit({ results: [{ filename: path.join(process.cwd(), "app.py"), line_number: 16, line_range: [16], test_id: "B608", issue_cwe: { id: 89 } }] }, "bandit", process.cwd());
+  assert.deepEqual(banditFindings[0]?.ruleIds, ["B608", "CWE-89"]);
+  assert.equal(scoreScannerFindings(banditFindings, [{ id: "sql", vulnerable: true, file: "app.py", startLine: 16, ruleIds: ["CWE-89"] }]).candidate.truePositive, 1);
 });
 
 test("benchmark runner can audit a pinned-style local checkout source", async () => {

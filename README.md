@@ -69,6 +69,8 @@ evo-audit score ./ground-truth.json ./external.sarif --format sarif
 # RealVuln per-repository ground-truth.json is also accepted.
 evo-audit score ./realvuln-ground-truth.json ./external.sarif \
   --format sarif --ground-truth-format realvuln
+evo-audit score ./realvuln-ground-truth.json ./bandit.json \
+  --format bandit --root ./pinned-project --ground-truth-format realvuln
 
 # Reproduce one pinned RealVuln v2.0 repository after cloning its benchmark.
 evo-audit realvuln ./Real-Vuln-Benchmark \
