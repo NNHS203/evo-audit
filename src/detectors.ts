@@ -174,7 +174,7 @@ function findMatch(rule: PlaybookRule, line: string, rawLine = line, relativePat
     };
   }
 
-  if (rule.id === "PY-CLEARTEXT-PASSWORD-001" && /\bpassword\s*=\s*(?:db\s*\.\s*Column|Column)\s*\(/i.test(line)) {
+  if (rule.id === "PY-CLEARTEXT-PASSWORD-001" && /(?:^|[\\/])models?(?:[\\/]|_|\.)/i.test(relativePath) && /\bpassword\s*=\s*(?:db\s*\.\s*Column|Column)\s*\(/i.test(line)) {
     return {
       rootCause: "A Python model declares a password field without an observed one-way hashing boundary.",
       impact: "A database disclosure can expose reusable credentials and enable account takeover.",
