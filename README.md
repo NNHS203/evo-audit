@@ -1,84 +1,104 @@
 # Evo Audit
 
-Evo Audit is a CLI-first, evidence-gated AI code auditing core. It is designed
-to compose existing Frontier audit workers rather than hide the audit process
-inside a single model.
+Evo Audit is a CLI-first, evidence-gated AI code-auditing kernel. It composes
+Frontier audit workers, but does not allow a model to grade its own homework.
 
-The first slice is intentionally small and deterministic:
+The core workflow is:
 
-1. discover the audit scope;
-2. create semantic-audit obligations from code facts;
-3. detect high-risk source/sink patterns;
-4. emit evidence-tiered candidate findings;
-5. persist a replayable run artifact;
-6. expose a semantic file delta for token-aware worker scheduling;
-7. leave a stable protocol for Frontier workers and reviewable playbook evolution.
+```text
+snapshot -> obligations -> worker hypotheses -> independent validator -> finding
+```
 
-The built-in detector never upgrades a static suspicion into a verified
-vulnerability. A finding is `SUSPECTED` until an execution-capable worker adds
-reproducible evidence.
+Static detectors create hypotheses and falsifiable obligations. A worker may
+propose an attack path or a validation request, but only an independent
+validator can create `T2_REPRODUCIBLE` evidence and `VERIFIED` status.
 
 ## Quick start
 
 ```bash
 npm install
+npm test
 npm run build
+
 node dist/src/cli.js init ./example
-node dist/src/cli.js run ./example --output ./audit-runs
+node dist/src/cli.js review ./example --output ./audit-runs
+node dist/src/cli.js report ./audit-runs/<run-id>/run.json --format sarif
 ```
 
-The CLI also installs as `evo-audit` when this package is linked or published.
+The package installs as `evo-audit` when linked or published.
 
-## Current protocol
+## CLI workflow
 
-- `AuditObligation`: a property or risk boundary that should be checked.
-- `Finding`: a root-cause hypothesis plus evidence and its limitations.
-- `EvidenceTier`: `T0_HYPOTHESIS`, `T1_STATIC_PATH`, or `T2_REPRODUCIBLE`.
-- `FindingStatus`: `SUSPECTED`, `SUPPORTED`, `VERIFIED`, `NOT_TESTED`, or
-  `HARNESS_FAILED`.
-- `AuditRun`: immutable run metadata, file fingerprints, obligations, findings,
-  semantic delta, and token accounting.
+```bash
+# Review a repository and persist a replayable run.
+evo-audit review .
+
+# Preserve full coverage while exposing changed files to workers.
+evo-audit review . --baseline ./audit-runs/<previous-run>/run.json
+
+# Create a validation request for a candidate finding.
+evo-audit verify ./audit-runs/<run>/run.json <finding-id> \
+  --command "node isolated-reproducer.js" \
+  --negative "node isolated-negative-control.js"
+
+# Apply a result produced by an independent validator.
+evo-audit validate ./audit-runs/<run>/run.json ./validation-result.json
+
+# Track root causes across scans, without treating incomplete coverage as clean.
+evo-audit compare ./before/run.json ./after/run.json
+
+# Inspect or resume pending obligations.
+evo-audit status ./audit-runs/<run>/run.json
+evo-audit resume ./audit-runs/<run>/run.json
+```
+
+Reports support `text`, `json`, and `sarif` formats. SARIF results include
+stable root-cause fingerprints so downstream code-scanning systems can track
+findings even when line numbers move.
+
+## Evidence contract
+
+`AuditRun` records a file manifest, tree digest, coverage state, semantic delta,
+obligations, findings, and token accounting. A validator result must identify
+the run and finding, match the snapshot digest and source fingerprints, and
+declare an approved sandbox policy.
+
+For `VERIFIED`, the validator must provide:
+
+- a passing reproducer with exit code and output digests;
+- a passing negative control;
+- read-only source execution in a no-network or allowlisted sandbox;
+- evidence mapped to files in the audited snapshot.
+
+If the workspace changes after the run, validation fails closed. An empty
+finding list or incomplete coverage is never represented as proof of safety.
 
 ## Frontier worker boundary
 
-The CLI is the audit kernel; a model is an interchangeable investigator. A
-worker writes a JSON object with `worker`, `findings`, optional evidence, and
-optional token accounting, then it can be merged without changing the core:
+Workers are interchangeable investigators. They can be backed by Codex,
+OpenCode, Claude, a local model, CodeQL, Semgrep, or a custom harness. Their
+results are ingested through the JSON protocol:
 
 ```bash
-node dist/src/cli.js ingest \
-  ./audit-runs/<run-id>/run.json \
-  ./worker-result.json
+evo-audit ingest ./audit-runs/<run>/run.json ./worker-result.json
 ```
 
-The merge layer deduplicates by obligation or source location, records the
-worker identity, accumulates token accounting, and gates `VERIFIED` behind a
-reproducible `T2_REPRODUCER`. A model cannot promote its own unsupported claim.
+Worker claims are deliberately downgraded to hypotheses/supporting evidence.
+The validator-owned ledger is the only path to `VERIFIED`.
 
-For an incremental run, keep the full scan for coverage but give workers the
-semantic delta:
+## Research direction
 
-```bash
-node dist/src/cli.js run ./example \
-  --baseline ./audit-runs/<previous-run-id>/run.json
-```
-
-To generate a reviewable (not automatically applied) playbook proposal from
-open obligations:
-
-```bash
-node dist/src/cli.js evolve ./audit-runs/<run-id>/run.json
-```
+The next depth layer is a code graph for TypeScript/JavaScript: imports,
+symbols, calls, source-to-sink flows, authorization boundaries, sanitizers, and
+tests. Workers should receive compact graph slices instead of entire
+repositories. Playbook changes should be evaluated on held-out cases before
+they are accepted.
 
 The benchmark contract is documented in [`benchmark/README.md`](benchmark/README.md).
 
-## Design boundary
+## Safety boundary
 
-The core is local-first and model-agnostic. It does not execute production
-commands or treat a model's confidence as proof. Frontier adapters can add
-runtime evidence through the protocol without changing the CLI or detector.
-
-The product thesis is therefore not “pick a better model.” It is an evidence
-kernel around existing Frontier workers: open the right obligations, allocate
-context from semantic deltas, ask for falsifiable evidence, and evolve the
-procedure only through replayable holdout evaluation.
+Evo Audit is local-first and model-agnostic. It does not execute production
+commands, automatically modify source, or treat model confidence as proof.
+Any execution-capable validator must provide its own sandbox, resource limits,
+network policy, and credential isolation.

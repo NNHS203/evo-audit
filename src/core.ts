@@ -70,6 +70,12 @@ function sha256(buffer: Buffer): string {
   return createHash("sha256").update(buffer).digest("hex");
 }
 
+function treeDigest(files: FileFingerprint[]): string {
+  return createHash("sha256")
+    .update(files.map((file) => `${file.path}\0${file.sha256}\0${file.bytes}`).sort().join("\n"), "utf8")
+    .digest("hex");
+}
+
 function gitValue(root: string, args: string[]): string | null {
   try {
     return execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
@@ -152,11 +158,18 @@ export async function runAudit(rootInput: string, options: { output: string; str
     allObligations.push(...result.obligations);
   }
 
-  const findings = options.strict
+  const reportableFindings = options.strict
     ? allFindings.filter((finding) => playbook.evidencePolicy.reportableTiers.includes(finding.evidenceTier) && finding.status === "VERIFIED")
     : allFindings;
   const semanticDelta = computeSemanticDelta(files, options.baseline);
+  const revision = gitValue(root, ["rev-parse", "HEAD"]);
   const completedAt = new Date().toISOString();
+  const snapshot = {
+    treeDigest: treeDigest(files),
+    revision,
+    capturedAt: completedAt,
+    files,
+  };
   const run: AuditRun = {
     schemaVersion: 1,
     runId,
@@ -164,13 +177,20 @@ export async function runAudit(rootInput: string, options: { output: string; str
     completedAt,
     root,
     baseline: gitValue(root, ["rev-parse", "HEAD~1"]),
-    head: gitValue(root, ["rev-parse", "HEAD"]),
+    head: revision,
     mode: gitMode(root),
     playbook: { id: playbook.id, version: playbook.version },
     files,
+    snapshot,
+    coverage: {
+      complete: true,
+      strategy: "FULL_SCAN",
+      filesReviewed: relativeFiles,
+    },
     semanticDelta,
     obligations: allObligations,
-    findings,
+    findings: allFindings,
+    reportableFindingIds: reportableFindings.map((finding) => finding.id),
     tokenAccounting: {
       inputTokens: 0,
       outputTokens: 0,
@@ -183,6 +203,7 @@ export async function runAudit(rootInput: string, options: { output: string; str
       "SUSPECTED and SUPPORTED findings require an execution-capable worker before they can be reported as VERIFIED.",
       "No finding is evidence that untested code is safe.",
       `Semantic delta basis: ${semanticDelta.basis}; changed=${semanticDelta.changed.length}, added=${semanticDelta.added.length}, removed=${semanticDelta.removed.length}.`,
+      `Snapshot tree digest: ${snapshot.treeDigest}.`,
     ],
   };
 
@@ -191,10 +212,12 @@ export async function runAudit(rootInput: string, options: { output: string; str
   return { run, artifactDir };
 }
 
-export function summarizeRun(run: AuditRun): string {
+export function summarizeRun(run: AuditRun, options: { findingIds?: string[] } = {}): string {
+  const visibleIds = options.findingIds ? new Set(options.findingIds) : null;
+  const visibleFindings = visibleIds ? run.findings.filter((finding) => visibleIds.has(finding.id)) : run.findings;
   const counts = new Map<string, number>();
-  for (const finding of run.findings) counts.set(finding.status, (counts.get(finding.status) ?? 0) + 1);
-  const countText = ["VERIFIED", "SUPPORTED", "SUSPECTED", "NOT_TESTED", "HARNESS_FAILED"]
+  for (const finding of visibleFindings) counts.set(finding.status, (counts.get(finding.status) ?? 0) + 1);
+  const countText = ["VERIFIED", "SUPPORTED", "SUSPECTED", "REJECTED", "DUPLICATE", "UNKNOWN", "NOT_TESTED", "HARNESS_FAILED"]
     .filter((status) => counts.has(status))
     .map((status) => `${status}=${counts.get(status)}`)
     .join("  ");
@@ -204,7 +227,7 @@ export function summarizeRun(run: AuditRun): string {
     `Findings: ${countText || "none"}`,
     `Tokens: ${run.tokenAccounting.inputTokens} in / ${run.tokenAccounting.outputTokens} out (source=${run.tokenAccounting.source})`,
   ];
-  for (const finding of run.findings) {
+  for (const finding of visibleFindings) {
     const location = finding.locations[0];
     const locationText = location ? `${location.file}:${location.line}` : "<unmapped>";
     lines.push(`- [${finding.status}] ${finding.severity} ${finding.title} (${locationText})`);
@@ -224,7 +247,10 @@ export async function persistRunArtifacts(artifactDir: string, run: AuditRun): P
     schemaVersion: 1,
     runId: run.runId,
     files: run.files,
+    snapshot: run.snapshot,
+    coverage: run.coverage,
     semanticDelta: run.semanticDelta,
+    reportableFindingIds: run.reportableFindingIds,
     playbook: run.playbook,
     tokenAccounting: run.tokenAccounting,
   });

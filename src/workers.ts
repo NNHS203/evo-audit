@@ -11,6 +11,9 @@ import type {
 
 const statusRank: Record<FindingStatus, number> = {
   HARNESS_FAILED: 0,
+  UNKNOWN: 1,
+  DUPLICATE: 1,
+  REJECTED: 1,
   NOT_TESTED: 1,
   SUSPECTED: 2,
   SUPPORTED: 3,
@@ -59,6 +62,27 @@ function hasReproducibleEvidence(evidence: EvidenceItem[]): boolean {
 
 function hasTraceEvidence(evidence: EvidenceItem[]): boolean {
   return evidence.some((item) => item.type === "TRACE" || item.type === "TOOL_RESULT");
+}
+
+function workerClaimGate(status: FindingStatus, evidenceTier: Finding["evidenceTier"], evidence: EvidenceItem[]): {
+  status: FindingStatus;
+  evidenceTier: Finding["evidenceTier"];
+  limitation?: EvidenceItem;
+} {
+  const trace = hasTraceEvidence(evidence);
+  const gatedStatus = status === "VERIFIED" ? (trace ? "SUPPORTED" : "SUSPECTED") : status;
+  const gatedTier = evidenceTier === "T2_REPRODUCIBLE" ? (trace ? "T1_STATIC_PATH" : "T0_HYPOTHESIS") : evidenceTier;
+  if (gatedStatus === status && gatedTier === evidenceTier) return { status, evidenceTier };
+  return {
+    status: gatedStatus,
+    evidenceTier: gatedTier,
+    limitation: {
+      type: "LIMITATION",
+      title: "Worker claim gated",
+      detail: "A worker can propose a reproducer, but only the independent validator can create T2 evidence or VERIFIED status.",
+      reproducible: false,
+    },
+  };
 }
 
 function gateClaim(
@@ -132,8 +156,9 @@ function mergeFinding(run: AuditRun, result: AuditWorkerResult, candidate: Audit
   const evidence = uniqueEvidence([...(existing?.evidence ?? []), ...(candidate.evidence ?? [])]);
   const locations = candidate.locations ?? existing?.locations ?? [];
   const scopeValid = locations.length > 0 && locations.every((location) => run.files.some((file) => file.path === location.file));
-  const claim = gateClaim(candidate.status, candidate.evidenceTier, evidence, scopeValid);
-  const limitation = claim.limitation ? [claim.limitation] : [];
+  const workerClaim = workerClaimGate(candidate.status, candidate.evidenceTier, evidence);
+  const claim = gateClaim(workerClaim.status, workerClaim.evidenceTier, evidence, scopeValid);
+  const limitation = [workerClaim.limitation, claim.limitation].filter((item): item is EvidenceItem => Boolean(item));
   const obligationId = candidate.obligationId ?? existing?.obligationId ?? `${run.runId}-${result.worker}-${stableId([candidate.ruleId, candidate.title, locationsKey(locations)])}`;
 
   if (!existing && !run.obligations.some((obligation) => obligation.id === obligationId)) {

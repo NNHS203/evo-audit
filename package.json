@@ -3,18 +3,31 @@
   "version": "0.1.0",
   "description": "CLI-first, evidence-gated AI code auditing core",
   "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "exports": {
+    ".": "./dist/src/index.js"
+  },
   "bin": {
     "evo-audit": "dist/src/cli.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node --test dist/test/*.test.js",
-    "start": "node dist/src/cli.js"
+    "start": "node dist/src/cli.js",
+    "prepublishOnly": "npm run build"
   },
   "engines": {
     "node": ">=22"
   },
   "license": "Apache-2.0",
+  "files": [
+    "dist/src",
+    "README.md",
+    "LICENSE",
+    "SECURITY.md",
+    "benchmark"
+  ],
   "devDependencies": {
     "@types/node": "^24.0.0",
     "typescript": "^5.9.0"

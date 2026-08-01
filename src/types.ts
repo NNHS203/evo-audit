@@ -2,6 +2,9 @@ export type FindingStatus =
   | "SUSPECTED"
   | "SUPPORTED"
   | "VERIFIED"
+  | "REJECTED"
+  | "DUPLICATE"
+  | "UNKNOWN"
   | "NOT_TESTED"
   | "HARNESS_FAILED";
 
@@ -12,7 +15,7 @@ export type EvidenceTier =
 
 export type Severity = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 
-export type ObligationStatus = "OPEN" | "SATISFIED" | "BLOCKED";
+export type ObligationStatus = "OPEN" | "SATISFIED" | "BLOCKED" | "REJECTED" | "UNKNOWN";
 
 export interface AuditConfig {
   schemaVersion: 1;
@@ -102,6 +105,20 @@ export interface SemanticDelta {
   workerHint: string;
 }
 
+export interface AuditSnapshot {
+  treeDigest: string;
+  revision: string | null;
+  capturedAt: string;
+  files: FileFingerprint[];
+}
+
+export interface AuditCoverage {
+  complete: boolean;
+  strategy: "FULL_SCAN" | "DIFF" | "PARTIAL";
+  filesReviewed: string[];
+  unknownReason?: string;
+}
+
 export interface TokenAccounting {
   inputTokens: number;
   outputTokens: number;
@@ -121,9 +138,12 @@ export interface AuditRun {
   mode: "WORKTREE" | "DIFF" | "PATH";
   playbook: Pick<AuditPlaybook, "id" | "version">;
   files: FileFingerprint[];
+  snapshot: AuditSnapshot;
+  coverage: AuditCoverage;
   semanticDelta: SemanticDelta;
   obligations: AuditObligation[];
   findings: Finding[];
+  reportableFindingIds: string[];
   tokenAccounting: TokenAccounting;
   notes: string[];
 }
@@ -146,6 +166,48 @@ export interface AuditWorkerResult {
     }
   >;
   tokenAccounting?: Partial<TokenAccounting>;
+  notes?: string[];
+}
+
+export interface ValidationRequest {
+  schemaVersion: 1;
+  requestId: string;
+  runId: string;
+  findingId: string;
+  baseTreeDigest: string;
+  targetFiles: string[];
+  reproducerCommand: string;
+  negativeControlCommand: string;
+  timeoutMs: number;
+  sandboxProfile: "READ_ONLY_NO_NETWORK" | "READ_ONLY_ALLOWLIST";
+}
+
+export interface ValidationCommandResult {
+  command: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  passed: boolean;
+  stdoutDigest: string;
+  stderrDigest: string;
+}
+
+export interface ValidationResult {
+  schemaVersion: 1;
+  validator: string;
+  requestId: string;
+  runId: string;
+  findingId: string;
+  outcome: "VERIFIED" | "REJECTED" | "BLOCKED" | "HARNESS_FAILED";
+  baseTreeDigest: string;
+  sourceFiles: FileFingerprint[];
+  sandbox: {
+    profile: "READ_ONLY_NO_NETWORK" | "READ_ONLY_ALLOWLIST" | "HOST_UNSAFE";
+    readOnlySource: boolean;
+    network: "DENY" | "ALLOWLIST" | "UNRESTRICTED";
+  };
+  reproducer: ValidationCommandResult;
+  negativeControl: ValidationCommandResult;
+  evidence?: EvidenceItem[];
   notes?: string[];
 }
 

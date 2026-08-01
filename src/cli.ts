@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 import path from "node:path";
+import { compareRuns } from "./compare.js";
 import { initWorkspace, persistRunArtifacts, readJson, resolveInput, runAudit, summarizeRun, writeJson } from "./core.js";
+import { buildResumePlan } from "./resume.js";
+import { toSarif } from "./sarif.js";
+import { applyValidationResult, assertWorkspaceMatchesSnapshot, createValidationRequest } from "./validator.js";
 import { mergeWorkerResult } from "./workers.js";
-import type { AuditRun, AuditWorkerResult } from "./types.js";
+import type { AuditRun, AuditWorkerResult, ValidationResult } from "./types.js";
 
 function usage(): string {
-  return `Evo Audit\n\nCommands:\n  init <path>                         Create audit.config.json and audit.playbook.json\n  run <path> [--output DIR]           Run the deterministic audit core\n  run <path> --baseline RUN.json       Record semantic file delta for worker prioritization\n  run <path> --strict                  Show only evidence-policy reportable findings\n  ingest <run.json> <worker.json>      Merge a Frontier worker result into a saved run\n  evolve <run.json> [--output FILE]    Propose playbook improvements from audit gaps\n  report <run.json> [--json]           Print a saved audit run\n\nThe first version reports static candidates as SUSPECTED or SUPPORTED.\nOnly an execution-capable worker may promote a finding to VERIFIED.`;
+  return `Evo Audit\n\nCommands:\n  init <path>                         Create audit.config.json and audit.playbook.json\n  review <path> [--output DIR]        Run the audit core in review mode\n  run <path> [--output DIR]           Alias for review\n  run <path> --baseline RUN.json      Record semantic delta for worker prioritization\n  run <path> --strict                 Show only evidence-policy reportable findings\n  verify <run.json> <finding-id>      Create a validator request for one finding\n  validate <run.json> <result.json>   Apply an independent validator result\n  compare <before.json> <after.json> Compare findings by root cause across runs\n  status <run.json>                   Show coverage and pending obligations\n  resume <run.json> [--output FILE]   Write a resumable pending-work plan\n  ingest <run.json> <worker.json>     Merge a Frontier worker result into a saved run\n  evolve <run.json> [--output FILE]   Propose playbook improvements from audit gaps\n  report <run.json> [--format FORMAT] Print text, json, or sarif\n\nWorkers may propose hypotheses, but only an independent validator may create VERIFIED evidence.`;
 }
 
 function flag(args: string[], name: string): boolean {
@@ -18,7 +22,7 @@ function valueFlag(args: string[], name: string, fallback: string): string {
 }
 
 async function main(): Promise<void> {
-  const [, , command, input, workerInput] = process.argv;
+  const [, , command, input, secondInput] = process.argv;
   const args = process.argv.slice(2);
   if (!command || command === "help" || command === "--help") {
     console.log(usage());
@@ -33,13 +37,14 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (command === "run") {
+  if (command === "run" || command === "review") {
     const target = resolveInput(cwd, input);
     const output = path.resolve(cwd, valueFlag(args, "--output", "audit-runs"));
     const baselinePath = valueFlag(args, "--baseline", "");
     const baseline = baselinePath ? await readJson<AuditRun>(path.resolve(cwd, baselinePath)) : undefined;
-    const result = await runAudit(target, { output, strict: flag(args, "--strict"), baseline });
-    console.log(summarizeRun(result.run));
+    const strict = flag(args, "--strict");
+    const result = await runAudit(target, { output, strict, baseline });
+    console.log(summarizeRun(result.run, strict ? { findingIds: result.run.reportableFindingIds } : {}));
     console.log(`Artifacts: ${result.artifactDir}`);
     return;
   }
@@ -47,15 +52,85 @@ async function main(): Promise<void> {
   if (command === "report") {
     if (!input) throw new Error("report requires a path to run.json");
     const run = await readJson<AuditRun>(path.resolve(cwd, input));
-    if (flag(args, "--json")) console.log(JSON.stringify(run, null, 2));
-    else console.log(summarizeRun(run));
+    const format = valueFlag(args, "--format", flag(args, "--json") ? "json" : "text");
+    if (format === "json") console.log(JSON.stringify(run, null, 2));
+    else if (format === "sarif") console.log(JSON.stringify(toSarif(run), null, 2));
+    else if (format === "text") console.log(summarizeRun(run, flag(args, "--strict") ? { findingIds: run.reportableFindingIds ?? [] } : {}));
+    else throw new Error(`Unknown report format: ${format}`);
+    return;
+  }
+
+  if (command === "verify") {
+    if (!input || !secondInput) throw new Error("verify requires a run.json and finding-id");
+    const run = await readJson<AuditRun>(path.resolve(cwd, input));
+    const finding = run.findings.find((candidate) => candidate.id === secondInput);
+    if (!finding) throw new Error(`Finding not found: ${secondInput}`);
+    const reproducerCommand = valueFlag(args, "--command", "");
+    const negativeControlCommand = valueFlag(args, "--negative", "");
+    if (!reproducerCommand || !negativeControlCommand) throw new Error("verify requires --command and --negative");
+    const output = path.resolve(cwd, valueFlag(args, "--output", `validation-${finding.id}.json`));
+    await writeJson(output, createValidationRequest(run, finding, { reproducerCommand, negativeControlCommand }));
+    console.log(`Validation request: ${output}`);
+    return;
+  }
+
+  if (command === "validate") {
+    if (!input || !secondInput) throw new Error("validate requires a run.json and result.json");
+    const runPath = path.resolve(cwd, input);
+    const originalRun = await readJson<AuditRun>(runPath);
+    const validation = await readJson<ValidationResult>(path.resolve(cwd, secondInput));
+    const integrity = await assertWorkspaceMatchesSnapshot(originalRun);
+    const checkedResult: ValidationResult = integrity.ok
+      ? validation
+      : {
+          ...validation,
+          outcome: "HARNESS_FAILED",
+          notes: [...(validation.notes ?? []), `Workspace changed after snapshot: ${integrity.changed.join(", ")}`],
+        };
+    const applied = applyValidationResult(originalRun, checkedResult);
+    await persistRunArtifacts(path.dirname(runPath), applied.run);
+    console.log(`${applied.gate.status}: ${applied.gate.reason}`);
+    console.log(summarizeRun(applied.run));
+    return;
+  }
+
+  if (command === "compare") {
+    if (!input || !secondInput) throw new Error("compare requires before.json and after.json");
+    const before = await readJson<AuditRun>(path.resolve(cwd, input));
+    const after = await readJson<AuditRun>(path.resolve(cwd, secondInput));
+    const comparison = compareRuns(before, after);
+    if (flag(args, "--json")) console.log(JSON.stringify(comparison, null, 2));
+    else {
+      console.log(`Compare ${comparison.beforeRunId} -> ${comparison.afterRunId}`);
+      console.log(`Coverage: ${comparison.coverage.complete ? "complete" : "unknown"}`);
+      for (const item of comparison.findings) console.log(`- [${item.lifecycle}] ${item.identity}`);
+    }
+    return;
+  }
+
+  if (command === "status" || command === "resume") {
+    if (!input) throw new Error(`${command} requires a run.json`);
+    const run = await readJson<AuditRun>(path.resolve(cwd, input));
+    const plan = buildResumePlan(run);
+    if (command === "status") {
+      if (flag(args, "--json")) console.log(JSON.stringify(plan, null, 2));
+      else {
+        console.log(`Run ${run.runId}`);
+        console.log(`Coverage: ${run.coverage?.complete ? "complete" : "unknown"}  Pending obligations: ${plan.pendingObligations.length}`);
+        for (const obligation of plan.pendingObligations) console.log(`- [${obligation.status}] ${obligation.id}: ${obligation.title}`);
+      }
+      return;
+    }
+    const output = path.resolve(cwd, valueFlag(args, "--output", path.join(path.dirname(input), "resume-plan.json")));
+    await writeJson(output, plan);
+    console.log(`Resume plan: ${output}`);
     return;
   }
 
   if (command === "ingest") {
-    if (!input || !workerInput) throw new Error("ingest requires a run.json and worker.json");
+    if (!input || !secondInput) throw new Error("ingest requires a run.json and worker.json");
     const runPath = path.resolve(cwd, input);
-    const worker = await readJson<AuditWorkerResult>(path.resolve(cwd, workerInput));
+    const worker = await readJson<AuditWorkerResult>(path.resolve(cwd, secondInput));
     const run = mergeWorkerResult(await readJson<AuditRun>(runPath), worker);
     await persistRunArtifacts(path.dirname(runPath), run);
     console.log(summarizeRun(run));
@@ -72,7 +147,7 @@ async function main(): Promise<void> {
       status: "PROPOSED",
       basedOn: { runId: run.runId, playbook: run.playbook },
       principles: [
-        "Promote only findings with reproducible T2 evidence.",
+        "Promote only findings with reproducible T2 evidence from an independent validator.",
         "Turn every unresolved obligation into a falsifiable verification task.",
         "Use compact evidence summaries before requesting more model context.",
       ],
