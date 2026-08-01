@@ -166,6 +166,29 @@ test("AST graph finds an indirect source-to-command-sink path without flagging a
   assert.match(graphFinding.evidence[0].title, /AST data-flow/i);
 });
 
+test("AST graph resolves imported helper chains without linking unrelated same-name functions", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-graph-imports-"));
+  await initWorkspace(root);
+  await writeFile(path.join(root, "danger.ts"), [
+    "import { exec } from 'node:child_process';",
+    "function inner(value) { return exec(value); }",
+    "export function runCommand(value) { return inner(value); }",
+  ].join("\n"), "utf8");
+  await writeFile(path.join(root, "safe.ts"), "export function runCommand(value) { return String(value); }\n", "utf8");
+  await writeFile(path.join(root, "routes.ts"), [
+    "import { runCommand as dangerous } from './danger.js';",
+    "import { runCommand as safe } from './safe.js';",
+    "export function handler(req) { return dangerous(req.query.command) + safe(req.query.command); }",
+  ].join("\n"), "utf8");
+
+  const { run } = await runAudit(root, { output: path.join(root, "runs") });
+  const graphFinding = run.findings.find((finding) => finding.ruleId === "JS-COMMAND-INJECTION-001");
+  assert.ok(graphFinding);
+  assert.equal(run.recon?.codeGraph?.flows.length, 1);
+  assert.equal(graphFinding.locations.some((location) => location.file === "danger.ts"), true);
+  assert.equal(graphFinding.locations.some((location) => location.file === "routes.ts"), true);
+});
+
 test("HUNT completion records unknown coverage and schedules a bounded second pass", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-gapfill-"));
   await initWorkspace(root);
@@ -623,12 +646,16 @@ test("benchmark acceptance gate is explicit about metric regressions", () => {
       candidatePrecision: 0.5,
       falsePositiveRate: 0.5,
       matchingCandidateRecall: 1,
+      reportableRecall: 0,
+      validatedFindingRate: 0,
+      unsupportedClaimRate: 0,
       unknownCoverageRate: 1,
       tokensPerCase: 0,
+      tokensPerValidatedFinding: null,
       durationMsPerCase: 10,
     },
     notes: [],
   } satisfies BenchmarkReport;
-  assert.equal(evaluateBenchmark(report, { minCandidateRecall: 1, minCandidatePrecision: 0.9, maxFalsePositiveRate: 0 }).accepted, false);
+  assert.equal(evaluateBenchmark(report, { minCandidateRecall: 1, minCandidatePrecision: 0.9, maxFalsePositiveRate: 0, minReportableRecall: 1 }).accepted, false);
   assert.equal(evaluateBenchmark(report, { minCandidateRecall: 1, minCandidatePrecision: 0.5, maxFalsePositiveRate: 0.5 }).accepted, true);
 });

@@ -33,6 +33,8 @@ export interface BenchmarkCaseResult {
   candidateFound: boolean;
   matchingCandidate: boolean;
   falsePositive: boolean;
+  reportableFinding: boolean;
+  unsupportedClaim: boolean;
   findings: Array<Pick<Finding, "ruleId" | "status" | "evidenceTier" | "locations">>;
   coverageUnknown: boolean;
   tokenTotal: number;
@@ -45,6 +47,8 @@ export interface BenchmarkAcceptancePolicy {
   minCandidatePrecision?: number;
   maxFalsePositiveRate?: number;
   maxUnknownCoverageRate?: number;
+  minReportableRecall?: number;
+  maxUnsupportedClaimRate?: number;
 }
 
 export interface BenchmarkAcceptance {
@@ -65,8 +69,12 @@ export interface BenchmarkReport {
     candidatePrecision: number;
     falsePositiveRate: number;
     matchingCandidateRecall: number;
+    reportableRecall: number;
+    validatedFindingRate: number;
+    unsupportedClaimRate: number;
     unknownCoverageRate: number;
     tokensPerCase: number;
+    tokensPerValidatedFinding: number | null;
     durationMsPerCase: number;
   };
   notes: string[];
@@ -109,6 +117,8 @@ async function runCase(item: BenchmarkCase): Promise<BenchmarkCaseResult> {
     const matchingCandidate = item.expected.ruleId
       ? result.run.findings.some((finding) => finding.ruleId === item.expected.ruleId)
       : candidateFound;
+    const reportableFinding = (result.run.reportableFindingIds ?? []).some((id) => result.run.findings.some((finding) => finding.id === id));
+    const unsupportedClaim = result.run.findings.some((finding) => finding.status === "VERIFIED" && finding.evidenceTier !== "T2_REPRODUCIBLE");
     return {
       caseId: item.caseId,
       split: item.split,
@@ -117,6 +127,8 @@ async function runCase(item: BenchmarkCase): Promise<BenchmarkCaseResult> {
       candidateFound,
       matchingCandidate,
       falsePositive: !vulnerable && candidateFound,
+      reportableFinding,
+      unsupportedClaim,
       findings: result.run.findings.map(({ ruleId, status, evidenceTier, locations }) => ({ ruleId, status, evidenceTier, locations })),
       coverageUnknown: result.run.plan?.tasks.some((task) => task.phase === "HUNT" && task.status !== "COMPLETED") ?? true,
       tokenTotal: result.run.tokenAccounting.inputTokens + result.run.tokenAccounting.outputTokens,
@@ -152,8 +164,12 @@ export async function runBenchmark(directory: string, split?: string): Promise<B
       candidatePrecision: reported.length === 0 ? 1 : (reported.length - falsePositives.length) / reported.length,
       falsePositiveRate: safeDenominator <= 0 ? 0 : falsePositives.length / safeDenominator,
       matchingCandidateRecall: expected.length === 0 ? 1 : matching.length / expected.length,
+      reportableRecall: expected.length === 0 ? 1 : expected.filter((item) => item.reportableFinding).length / expected.length,
+      validatedFindingRate: reported.length === 0 ? 0 : reported.filter((item) => item.reportableFinding).length / reported.length,
+      unsupportedClaimRate: results.length === 0 ? 0 : results.filter((item) => item.unsupportedClaim).length / results.length,
       unknownCoverageRate: results.length === 0 ? 0 : unknown.length / results.length,
       tokensPerCase: tokenTotal / results.length,
+      tokensPerValidatedFinding: results.filter((item) => item.reportableFinding).length === 0 ? null : tokenTotal / results.filter((item) => item.reportableFinding).length,
       durationMsPerCase: results.reduce((sum, item) => sum + item.durationMs, 0) / results.length,
     },
     notes: [
@@ -176,6 +192,8 @@ export function evaluateBenchmark(report: BenchmarkReport, policy: BenchmarkAcce
     policy.minCandidatePrecision === undefined ? null : metricFailure("candidatePrecision", report.metrics.candidatePrecision, "min", policy.minCandidatePrecision),
     policy.maxFalsePositiveRate === undefined ? null : metricFailure("falsePositiveRate", report.metrics.falsePositiveRate, "max", policy.maxFalsePositiveRate),
     policy.maxUnknownCoverageRate === undefined ? null : metricFailure("unknownCoverageRate", report.metrics.unknownCoverageRate, "max", policy.maxUnknownCoverageRate),
+    policy.minReportableRecall === undefined ? null : metricFailure("reportableRecall", report.metrics.reportableRecall, "min", policy.minReportableRecall),
+    policy.maxUnsupportedClaimRate === undefined ? null : metricFailure("unsupportedClaimRate", report.metrics.unsupportedClaimRate, "max", policy.maxUnsupportedClaimRate),
   ].filter((failure): failure is string => failure !== null);
   return { accepted: failures.length === 0, policy, failures };
 }

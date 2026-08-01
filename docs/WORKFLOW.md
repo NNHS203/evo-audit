@@ -139,9 +139,10 @@ regression.
 
 ## Current implementation boundary
 
-The repository currently implements the snapshot, recon, AST/data-flow graph,
-coverage matrix, plan, evidence gate, compare, SARIF, resumable state, model
-provider, and container validation layers. The next safety-critical research
-layer is interprocedural symbol/data-flow resolution plus a held-out playbook
-evaluator. Neither recall nor false-negative performance should be claimed
-complete until it has reproducible benchmark results.
+The repository currently implements the snapshot, recon, AST/data-flow graph
+(including import-aware cross-file helper summaries), coverage matrix, plan,
+evidence gate, compare, SARIF, resumable state, model provider, container
+validation, benchmark acceptance, and revalidation layers. The next
+safety-critical research layer is broader framework/alias resolution plus a
+held-out model-backed evaluator. Neither recall nor false-negative performance
+should be claimed complete until it has reproducible benchmark results.

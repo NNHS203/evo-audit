@@ -75,6 +75,7 @@ interface InterproceduralScope {
 }
 
 interface FunctionSummary {
+  key: string;
   name: string;
   file: string;
   functionNodeId: string;
@@ -83,11 +84,20 @@ interface FunctionSummary {
 }
 
 interface CallSite {
+  callerKey: string | null;
   name: string;
   callNodeId: string;
   file: string;
+  targetFile?: string;
+  targetName?: string;
   argumentOrigins: string[][];
   argumentParameters: string[][];
+}
+
+interface ImportedBinding {
+  targetFile: string;
+  targetName: string;
+  namespace: boolean;
 }
 
 interface GraphBuilder {
@@ -348,19 +358,48 @@ function parameterReferences(expression: ts.Node, scope: InterproceduralScope): 
   return [...references];
 }
 
+function importedBindings(sourceFile: ts.SourceFile, file: string, files: Set<string>): Map<string, ImportedBinding> {
+  const bindings = new Map<string, ImportedBinding>();
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+      const targetFile = resolveRelativeImport(file, node.moduleSpecifier.text, files);
+      const clause = node.importClause;
+      if (targetFile && clause) {
+        if (clause.name) bindings.set(clause.name.text, { targetFile, targetName: "default", namespace: false });
+        if (clause.namedBindings && ts.isNamespaceImport(clause.namedBindings)) {
+          bindings.set(clause.namedBindings.name.text, { targetFile, targetName: "", namespace: true });
+        }
+        if (clause.namedBindings && ts.isNamedImports(clause.namedBindings)) {
+          for (const element of clause.namedBindings.elements) {
+            const localName = element.name.text;
+            const targetName = element.propertyName?.text ?? element.name.text;
+            bindings.set(localName, { targetFile, targetName, namespace: false });
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return bindings;
+}
+
 function analyzeInterprocedural(builder: GraphBuilder, files: FileFingerprint[], contents: Map<string, string>): void {
   const summaries: FunctionSummary[] = [];
   const calls: CallSite[] = [];
+  const fileSet = new Set(files.map((file) => file.path));
   for (const file of files) {
     const sourceFile = ts.createSourceFile(file.path, contents.get(file.path) ?? "", ts.ScriptTarget.Latest, true, scriptKind(file.path));
     const fileNodeId = builder.fileNodes.get(file.path) ?? `file:${stableId([file.path])}`;
+    const imports = importedBindings(sourceFile, file.path, fileSet);
     const rootScope: InterproceduralScope = { functionNodeId: fileNodeId, summary: null, tainted: new Map(), parameterDerived: new Map() };
     const visit = (node: ts.Node, scope: InterproceduralScope): void => {
       let active = scope;
       if (isFunctionLike(node)) {
         const functionNodeId = addNode(builder, sourceFile, node, "FUNCTION", functionName(node, sourceFile), "Function or method scope used for interprocedural flow summaries.");
         const parameters = node.parameters.filter((parameter) => ts.isIdentifier(parameter.name)).map((parameter) => (parameter.name as ts.Identifier).text);
-        const summary: FunctionSummary = { name: "name" in node && node.name && ts.isIdentifier(node.name) ? node.name.text : "anonymous", file: file.path, functionNodeId, parameters, sinks: [] };
+        const name = "name" in node && node.name && ts.isIdentifier(node.name) ? node.name.text : "anonymous";
+        const summary: FunctionSummary = { key: `${file.path}:${name}`, name, file: file.path, functionNodeId, parameters, sinks: [] };
         summaries.push(summary);
         const parameterDerived = new Map<string, Set<string>>();
         for (const parameter of parameters) parameterDerived.set(parameter, new Set([parameter]));
@@ -397,7 +436,13 @@ function analyzeInterprocedural(builder: GraphBuilder, files: FileFingerprint[],
           const sinkId = addNode(builder, sourceFile, node, "SINK", name, kind);
           if (active.summary) active.summary.sinks.push({ sinkNodeId: sinkId, parameterNames: [...new Set(argumentParameters.flat())] });
         } else if (name && !isGuardCall(name)) {
-          calls.push({ name: name.split(".").at(-1) ?? name, callNodeId, file: file.path, argumentOrigins, argumentParameters });
+          const parts = name.split(".");
+          const binding = imports.get(parts[0]);
+          const targetFile = binding?.targetFile;
+          const targetName = binding
+            ? binding.namespace ? parts.slice(1).join(".") : binding.targetName
+            : name;
+          calls.push({ callerKey: active.summary?.key ?? null, name, callNodeId, file: file.path, targetFile, targetName, argumentOrigins, argumentParameters });
         }
       }
 
@@ -406,23 +451,59 @@ function analyzeInterprocedural(builder: GraphBuilder, files: FileFingerprint[],
     visit(sourceFile, rootScope);
   }
 
-  const byName = new Map<string, FunctionSummary[]>();
+  const byKey = new Map<string, FunctionSummary[]>();
   for (const summary of summaries) {
     if (summary.name === "anonymous") continue;
-    const list = byName.get(summary.name) ?? [];
+    const list = byKey.get(summary.key) ?? [];
     list.push(summary);
-    byName.set(summary.name, list);
+    byKey.set(summary.key, list);
   }
+
+  const resolveSummary = (call: CallSite): FunctionSummary | undefined => {
+    const targetName = call.targetName ?? call.name;
+    const key = `${call.targetFile ?? call.file}:${targetName}`;
+    const candidates = byKey.get(key) ?? [];
+    return candidates.length === 1 ? candidates[0] : undefined;
+  };
+
+  const addSummarySink = (summary: FunctionSummary, sinkNodeId: string, parameterNames: string[]): boolean => {
+    const names = [...new Set(parameterNames.filter((name) => summary.parameters.includes(name)))].sort();
+    if (names.length === 0 || summary.sinks.some((sink) => sink.sinkNodeId === sinkNodeId && sink.parameterNames.join("\0") === names.join("\0"))) return false;
+    summary.sinks.push({ sinkNodeId, parameterNames: names });
+    return true;
+  };
+
+  // Compose summaries through a small, bounded fixpoint. This handles helper
+  // chains without allowing recursive or highly dynamic call graphs to consume
+  // unbounded audit time.
+  for (let pass = 0; pass < Math.min(4, Math.max(1, summaries.length)); pass += 1) {
+    let changed = false;
+    for (const call of calls) {
+      if (!call.callerKey) continue;
+      const caller = (byKey.get(call.callerKey) ?? [])[0];
+      const target = resolveSummary(call);
+      if (!caller || !target) continue;
+      for (const sink of target.sinks) {
+        const mappedParameters = sink.parameterNames.flatMap((parameterName) => {
+          const index = target.parameters.indexOf(parameterName);
+          return index >= 0 ? call.argumentParameters[index] ?? [] : [];
+        });
+        if (addSummarySink(caller, sink.sinkNodeId, mappedParameters)) changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+
   for (const call of calls) {
-    for (const summary of byName.get(call.name) ?? []) {
-      addEdge(builder, { from: call.callNodeId, to: summary.functionNodeId, kind: "CALLS", confidence: "MEDIUM", label: summary.name });
-      for (const sink of summary.sinks) {
-        for (const parameterName of sink.parameterNames) {
-          const parameterIndex = summary.parameters.indexOf(parameterName);
-          if (parameterIndex < 0) continue;
-          for (const sourceId of call.argumentOrigins[parameterIndex] ?? []) {
-            addFlow(builder, sourceId, sink.sinkNodeId, [], `A call-site argument reaches parameter ${parameterName} and then a ${nodesFor(builder, sink.sinkNodeId)?.detail ?? "dangerous"} sink.`, [sourceId, call.callNodeId, sink.sinkNodeId]);
-          }
+    const summary = resolveSummary(call);
+    if (!summary) continue;
+    addEdge(builder, { from: call.callNodeId, to: summary.functionNodeId, kind: "CALLS", confidence: "MEDIUM", label: summary.name });
+    for (const sink of summary.sinks) {
+      for (const parameterName of sink.parameterNames) {
+        const parameterIndex = summary.parameters.indexOf(parameterName);
+        if (parameterIndex < 0) continue;
+        for (const sourceId of call.argumentOrigins[parameterIndex] ?? []) {
+          addFlow(builder, sourceId, sink.sinkNodeId, [], `A call-site argument reaches parameter ${parameterName} and then a ${nodesFor(builder, sink.sinkNodeId)?.detail ?? "dangerous"} sink.`, [sourceId, call.callNodeId, sink.sinkNodeId]);
         }
       }
     }

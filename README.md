@@ -173,11 +173,12 @@ selection never replaces source evidence or independent validation. See
 
 ## Research direction
 
-The next depth layer is interprocedural graph expansion: resolved symbols,
-cross-function data-flow, authorization boundaries, sanitizers, tests, and
-framework entrypoint adapters. Workers already receive compact AST graph
-slices instead of entire repositories. Playbook changes should be evaluated on
-held-out cases before they are accepted.
+The graph layer now resolves local/imported symbols and composes bounded
+cross-function data-flow summaries. The next depth layer is framework-aware
+entrypoint adapters, alias/sanitizer semantics, tests, and a model-backed
+held-out evaluator. Workers receive compact AST graph slices instead of entire
+repositories. Playbook changes should be evaluated on held-out cases before
+they are accepted.
 
 The benchmark contract is documented in [`benchmark/README.md`](benchmark/README.md).
 The workflow rationale and research references are documented in

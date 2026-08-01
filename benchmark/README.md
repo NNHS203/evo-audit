@@ -57,3 +57,9 @@ Threshold flags turn the discovery metrics into a CI acceptance gate and exit
 non-zero on regression. The gate intentionally does not assert that unknown
 coverage is safe; use `--max-unknown` only when a benchmark has an explicit
 coverage-completion contract.
+
+The report also exposes `reportableRecall`, `validatedFindingRate`,
+`unsupportedClaimRate`, and `tokensPerValidatedFinding`. The deterministic
+runner is expected to report zero reportable recall until an independent
+validator result is applied; that zero is a useful guard against accidentally
+scoring static candidates as closed vulnerabilities.

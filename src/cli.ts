@@ -84,13 +84,15 @@ async function main(): Promise<void> {
       minCandidatePrecision: numberFlag(args, "--min-precision"),
       maxFalsePositiveRate: numberFlag(args, "--max-fpr"),
       maxUnknownCoverageRate: numberFlag(args, "--max-unknown"),
+      minReportableRecall: numberFlag(args, "--min-reportable-recall"),
+      maxUnsupportedClaimRate: numberFlag(args, "--max-unsupported-claim-rate"),
     });
     if (flag(args, "--json")) console.log(JSON.stringify(report, null, 2));
     else {
       console.log(`Benchmark ${report.split}: ${report.metrics.cases} cases`);
-      console.log(`Candidate recall=${report.metrics.candidateRecall.toFixed(3)} precision=${report.metrics.candidatePrecision.toFixed(3)} false-positive-rate=${report.metrics.falsePositiveRate.toFixed(3)} unknown-coverage=${report.metrics.unknownCoverageRate.toFixed(3)} tokens/case=${report.metrics.tokensPerCase.toFixed(0)} duration/case=${report.metrics.durationMsPerCase.toFixed(0)}ms`);
-      for (const item of report.cases) console.log(`- ${item.caseId}: ${item.expectedVulnerable ? "vulnerable" : "safe"} candidate=${item.candidateFound} match=${item.matchingCandidate} unknown=${item.coverageUnknown} duration=${item.durationMs}ms`);
-      if (acceptance.policy.minCandidateRecall !== undefined || acceptance.policy.minCandidatePrecision !== undefined || acceptance.policy.maxFalsePositiveRate !== undefined || acceptance.policy.maxUnknownCoverageRate !== undefined) {
+      console.log(`Candidate recall=${report.metrics.candidateRecall.toFixed(3)} precision=${report.metrics.candidatePrecision.toFixed(3)} false-positive-rate=${report.metrics.falsePositiveRate.toFixed(3)} reportable-recall=${report.metrics.reportableRecall.toFixed(3)} validated-rate=${report.metrics.validatedFindingRate.toFixed(3)} unsupported-claim-rate=${report.metrics.unsupportedClaimRate.toFixed(3)} unknown-coverage=${report.metrics.unknownCoverageRate.toFixed(3)} tokens/case=${report.metrics.tokensPerCase.toFixed(0)} duration/case=${report.metrics.durationMsPerCase.toFixed(0)}ms`);
+      for (const item of report.cases) console.log(`- ${item.caseId}: ${item.expectedVulnerable ? "vulnerable" : "safe"} candidate=${item.candidateFound} match=${item.matchingCandidate} reportable=${item.reportableFinding} unknown=${item.coverageUnknown} duration=${item.durationMs}ms`);
+      if (acceptance.policy.minCandidateRecall !== undefined || acceptance.policy.minCandidatePrecision !== undefined || acceptance.policy.maxFalsePositiveRate !== undefined || acceptance.policy.maxUnknownCoverageRate !== undefined || acceptance.policy.minReportableRecall !== undefined || acceptance.policy.maxUnsupportedClaimRate !== undefined) {
         console.log(`Acceptance: ${acceptance.accepted ? "PASS" : "FAIL"}`);
         for (const failure of acceptance.failures) console.log(`  - ${failure}`);
       }
