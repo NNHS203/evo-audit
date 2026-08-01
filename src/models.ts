@@ -194,10 +194,16 @@ function withinAutoCost(model: ModelDefinition, request: ModelTaskRequest, polic
   return estimate <= policy.maxCostPerRunUsd;
 }
 
-function outputTokenLimit(request: ModelTaskRequest, requested?: number): number {
-  const remaining = Math.floor(request.budgetTokens - request.estimatedInputTokens);
+function outputTokenLimit(request: ModelTaskRequest, requested?: number, maxContextTokens?: number): number {
+  const taskRemaining = Math.floor(request.budgetTokens - request.estimatedInputTokens);
+  const contextRemaining = maxContextTokens === undefined ? taskRemaining : Math.floor(maxContextTokens - request.estimatedInputTokens);
+  const remaining = Math.min(taskRemaining, contextRemaining);
   if (remaining < 64) throw new Error(`Model task input estimate (${request.estimatedInputTokens}) leaves less than 64 output tokens in its ${request.budgetTokens}-token budget.`);
   return Math.max(64, Math.min(Math.floor(requested ?? remaining), remaining));
+}
+
+function contextMatch(model: ModelDefinition, request: ModelTaskRequest): boolean {
+  return model.maxContextTokens === undefined || request.estimatedInputTokens + 64 <= model.maxContextTokens;
 }
 
 function chooseModel(config: AuditModelConfig, request: ModelTaskRequest): ModelDefinition {
@@ -205,11 +211,12 @@ function chooseModel(config: AuditModelConfig, request: ModelTaskRequest): Model
     const exact = config.models.find((candidate) => candidate.id === request.model && candidate.enabled !== false);
     if (!exact) throw new Error(`Model not found or disabled: ${request.model}`);
     if (!capabilityMatch(exact, request)) throw new Error(`Model ${request.model} does not support the required task capabilities.`);
+    if (!contextMatch(exact, request)) throw new Error(`Model ${request.model} context window is too small for the bounded task prompt.`);
     return exact;
   }
   if (!config.auto.enabled) throw new Error("Auto model routing is disabled and no explicit model was selected.");
   const minimum = positive(config.auto.minimumQualityTier, 0);
-  const candidates = config.models.filter((model) => model.enabled !== false && model.qualityTier >= minimum && capabilityMatch(model, request) && withinAutoCost(model, request, config.auto));
+  const candidates = config.models.filter((model) => model.enabled !== false && model.qualityTier >= minimum && capabilityMatch(model, request) && contextMatch(model, request) && withinAutoCost(model, request, config.auto));
   if (candidates.length === 0) throw new Error("No enabled model satisfies the task capabilities and auto-model policy.");
   return [...candidates].sort((left, right) => modelScore(right, request, config.auto) - modelScore(left, request, config.auto) || left.id.localeCompare(right.id))[0];
 }
@@ -250,7 +257,7 @@ async function completeOpenAI(model: ModelDefinition, credential: string | null,
   const result = await requestJson(`${model.baseUrl}/chat/completions`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ model: model.model, messages: request.messages, temperature: request.temperature ?? 0, max_tokens: outputTokenLimit(request, request.maxOutputTokens), response_format: { type: "json_object" } }),
+    body: JSON.stringify({ model: model.model, messages: request.messages, temperature: request.temperature ?? 0, max_tokens: outputTokenLimit(request, request.maxOutputTokens, model.maxContextTokens), response_format: { type: "json_object" } }),
   }, request.signal);
   const choice = Array.isArray(result.body.choices) ? result.body.choices[0] as Record<string, unknown> | undefined : undefined;
   const message = choice?.message && typeof choice.message === "object" ? choice.message as Record<string, unknown> : {};
@@ -275,7 +282,7 @@ async function completeAnthropic(model: ModelDefinition, credential: string | nu
   const result = await requestJson(`${model.baseUrl}/v1/messages`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ model: model.model, system: system || undefined, messages, max_tokens: outputTokenLimit(request, request.maxOutputTokens), temperature: request.temperature ?? 0 }),
+    body: JSON.stringify({ model: model.model, system: system || undefined, messages, max_tokens: outputTokenLimit(request, request.maxOutputTokens, model.maxContextTokens), temperature: request.temperature ?? 0 }),
   }, request.signal);
   return {
     requestId: String(result.body.id ?? result.headers.get("request-id") ?? randomUUID()),

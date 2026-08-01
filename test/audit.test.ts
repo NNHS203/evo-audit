@@ -274,6 +274,7 @@ test("model registry loads API/OAuth references and routes auto tasks without ex
         baseUrl: "https://example.invalid/v1",
         auth: { method: "OAUTH", tokenFile: path.join(root, "missing-token.json"), oauth: { authorizationUrl: "https://example.invalid/authorize", tokenUrl: "https://example.invalid/token", clientId: "client", scopes: [] } },
         qualityTier: 4,
+        maxContextTokens: 600,
         capabilities: ["HUNT", "INVESTIGATE", "JSON"],
       },
     ],
@@ -285,6 +286,7 @@ test("model registry loads API/OAuth references and routes auto tasks without ex
     assert.equal(statuses.find((model) => model.id === "frontier")?.credentialAvailable, true);
     assert.equal(statuses.find((model) => model.id === "oauth")?.credentialAvailable, false);
     assert.equal(registry.select({ phase: "HUNT", priority: 100, estimatedInputTokens: 500, budgetTokens: 4000 }).id, "frontier");
+    assert.throws(() => registry.select({ phase: "HUNT", priority: 50, estimatedInputTokens: 600, budgetTokens: 1000, model: "oauth" }), /context window/i);
     await registry.assertReady("frontier");
     await assert.rejects(() => registry.assertReady("oauth"), /No usable credential/i);
   } finally {

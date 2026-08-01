@@ -20,6 +20,7 @@ Create `audit.models.json` in the audited repository (or pass `--config`):
       "baseUrl": "https://api.example.com/v1",
       "auth": { "method": "API_KEY", "apiKeyEnv": "YOUR_PROVIDER_API_KEY" },
       "qualityTier": 5,
+      "maxContextTokens": 128000,
       "capabilities": ["HUNT", "INVESTIGATE", "VALIDATE", "JSON"]
     }
   ]
@@ -88,7 +89,10 @@ be used to tune `qualityTier`, preferred order, and playbook policy.
 
 Provider responses are normalized to the same completion and token-usage
 contract. Model calls are not validation evidence; they are worker input to the
-existing candidate and validator workflow.
+existing candidate and validator workflow. The worker prompt uses a conservative
+code/JSON token estimate, reserves output tokens, and will not select a model
+whose declared `maxContextTokens` cannot fit the task. Provider usage remains
+the authoritative post-call accounting.
 
 Model-backed commands perform a credential preflight before opening the worker
 queue. A missing API key or OAuth token fails clearly with the required

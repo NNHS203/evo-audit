@@ -67,7 +67,10 @@ export async function buildWorkerMessages(run: AuditRun, task: AuditTask): Promi
     "If evidence is insufficient, return no finding and explain the missing proof in notes.",
   ].join("\n");
   const promptBudgetTokens = Math.max(128, task.budgetTokens - 128);
-  const promptBudgetChars = promptBudgetTokens * 4;
+  // Code, JSON, and multilingual prompts can tokenize more densely than the
+  // usual prose-oriented chars/4 heuristic. Keep a conservative chars/3
+  // envelope so provider usage is less likely to exceed the task allocation.
+  const promptBudgetChars = promptBudgetTokens * 3;
   const user = [
     `Run snapshot: ${run.snapshot.treeDigest}`,
     `Playbook: ${run.playbook.id}@${run.playbook.version}`,
@@ -86,7 +89,7 @@ export async function buildWorkerMessages(run: AuditRun, task: AuditTask): Promi
   ].join("\n\n");
   const userBudgetChars = Math.max(320, promptBudgetChars - system.length - 32);
   const messages: ModelMessage[] = [{ role: "system", content: system }, { role: "user", content: compacted(user, userBudgetChars) }];
-  return { messages, estimatedInputTokens: Math.ceil(messages.reduce((total, message) => total + message.content.length, 0) / 4) };
+  return { messages, estimatedInputTokens: Math.ceil(messages.reduce((total, message) => total + message.content.length, 0) / 3) };
 }
 
 function parseJson(text: string): unknown {
