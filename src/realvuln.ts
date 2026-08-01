@@ -48,6 +48,10 @@ export interface RealVulnReport {
     runId: string;
     treeDigest: string;
     artifactDir: string;
+    model?: string;
+    workerTasks?: number;
+    validationAttempts?: number;
+    validationSkipped?: number;
   };
   score: ScannerScore;
   notes: string[];
@@ -74,6 +78,7 @@ export interface RealVulnAggregateReport {
   repositories: number;
   completed: number;
   blocked: number;
+  model?: string;
   aggregate: ScannerScore;
   entries: Array<{
     id: string;
@@ -212,6 +217,9 @@ export async function runRealVuln(
     const audit = await runAudit(checkout, { output: path.join(output, "audit-runs") });
     let run = audit.run as AuditRun;
     const workerNotes: string[] = [];
+    let workerTasks: number | undefined;
+    let validationAttempts: number | undefined;
+    let validationSkipped: number | undefined;
     if (options.model) {
       if (!options.modelConfig) throw new Error("A model config is required for model-backed RealVuln runs.");
       const queue = await executePendingWorkerTasks(run, new ModelRegistry(options.modelConfig), {
@@ -221,6 +229,7 @@ export async function runRealVuln(
         cacheDirectory: path.join(audit.artifactDir, "worker-cache"),
       });
       run = queue.run;
+      workerTasks = queue.results.length;
       workerNotes.push(`Model-backed worker mode ran ${queue.results.length} bounded HUNT/INVESTIGATE task(s) with ${options.model}.`);
       await persistRunArtifacts(audit.artifactDir, run);
     }
@@ -231,6 +240,8 @@ export async function runRealVuln(
         image: options.validationImage,
       });
       run = validation.run;
+      validationAttempts = validation.results.length;
+      validationSkipped = validation.skipped.length;
       workerNotes.push(`Model-proposed validation attempted=${validation.results.length} skipped=${validation.skipped.length}; blocked validation is not safe.`);
       await persistRunArtifacts(audit.artifactDir, run);
     }
@@ -248,7 +259,15 @@ export async function runRealVuln(
       benchmarkManifest: manifestPath,
       repository: { id: repoId, url: repository.repo_url, commit: repository.commit_sha, language: repository.language, framework: repository.framework },
       groundTruth: { path: groundTruthPath, sha256: sha256(groundTruthBytes), labels: labels.length },
-      audit: { runId: run.runId, treeDigest: run.snapshot.treeDigest, artifactDir: audit.artifactDir },
+      audit: {
+        runId: run.runId,
+        treeDigest: run.snapshot.treeDigest,
+        artifactDir: audit.artifactDir,
+        model: options.model,
+        workerTasks,
+        validationAttempts,
+        validationSkipped,
+      },
       score,
       notes: [
         "The checkout was cloned from the manifest URL and verified at its full commit SHA before auditing.",
@@ -319,6 +338,7 @@ export async function runRealVulnAll(
     repositories: entries.length,
     completed: entries.filter((entry) => entry.status === "COMPLETED").length,
     blocked: entries.filter((entry) => entry.status === "BLOCKED").length,
+    model: options.model,
     aggregate: aggregateScores(scores),
     entries,
     notes: [
