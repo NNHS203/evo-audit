@@ -99,6 +99,12 @@
       "sha256": "cf8765540f46065ba9bf185c245da48c10e5eec3b3ef28d8e276d088390e22f5"
     },
     {
+      "file": "cases/python-sql-validator-safe-001.json",
+      "caseId": "python-sql-validator-safe-001",
+      "split": "validator",
+      "sha256": "6497b944ca9670ea963b2a0f8943687c6feaa62ed269852daa6d2677bcb60334"
+    },
+    {
       "file": "cases/python-django-idor-001.json",
       "caseId": "framework-django-idor-001",
       "split": "framework-holdout",

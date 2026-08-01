@@ -69,8 +69,9 @@ evo-audit realvuln ./Real-Vuln-Benchmark \
 The checked-in development track covers JavaScript/TypeScript and Python
 source-to-sink cases, including explicit safe traps. The separate `validator`
 split currently covers JavaScript dynamic code execution, Python command
-injection, and Python SQL injection, each with a positive reproducer and a
-negative control. The runner creates an isolated temporary workspace for each
+injection, Python SQL injection, and an independent safe parameterized-SQL
+control. Each vulnerable case has a positive reproducer and a negative control.
+The runner creates an isolated temporary workspace for each
 case, records the
 candidate result, and removes that workspace after the case. It reports
 candidate recall/precision, false-positive rate on explicitly labeled safe

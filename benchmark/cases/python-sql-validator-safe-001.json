@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "caseId": "python-sql-validator-safe-001",
+  "split": "validator",
+  "language": "python",
+  "file": "src/app.py",
+  "code": "import sqlite3\n\ndef lookup(req):\n    connection = sqlite3.connect(':memory:')\n    connection.execute('CREATE TABLE users(name TEXT)')\n    query = 'SELECT name FROM users WHERE name = ?'\n    return connection.execute(query, (req.body.name,)).fetchall()\n",
+  "property": "A request-controlled SQL value remains data when it is passed through a parameterized query placeholder.",
+  "expected": {
+    "vulnerable": false,
+    "ruleId": "PY-SQL-INJECTION-001"
+  },
+  "notes": [
+    "This is an independent safe control for the validator split, not only a negative control inside a vulnerable case.",
+    "The request value is bound as a parameter and cannot alter query syntax."
+  ]
+}
