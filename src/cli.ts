@@ -84,6 +84,7 @@ async function main(): Promise<void> {
       model: requestedModel || undefined,
       modelConfig,
       maxModelTasks: numberFlag(args, "--max-model-tasks"),
+      manifestPath: valueFlag(args, "--manifest", "") || undefined,
     });
     const acceptance = evaluateBenchmark(report, {
       minCandidateRecall: numberFlag(args, "--min-recall"),

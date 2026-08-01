@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -64,6 +65,14 @@ export interface BenchmarkOptions {
   model?: string;
   modelConfig?: AuditModelConfig;
   maxModelTasks?: number;
+  manifestPath?: string;
+}
+
+export interface BenchmarkManifest {
+  schemaVersion: 1;
+  benchmarkVersion: string;
+  cases: Array<{ file: string; caseId: string; split: string; sha256: string }>;
+  notes?: string[];
 }
 
 export interface BenchmarkReport {
@@ -109,6 +118,26 @@ async function loadCases(directory: string): Promise<BenchmarkCase[]> {
     cases.push(parsed);
   }
   return cases.sort((left, right) => left.caseId.localeCompare(right.caseId));
+}
+
+async function verifyBenchmarkManifest(casesDirectory: string, cases: BenchmarkCase[], manifestPath: string): Promise<void> {
+  const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8")) as BenchmarkManifest;
+  if (manifest.schemaVersion !== 1 || !manifest.benchmarkVersion || !Array.isArray(manifest.cases)) throw new Error(`Invalid benchmark manifest: ${manifestPath}`);
+  if (manifest.cases.length !== cases.length) throw new Error(`Benchmark manifest case count does not match ${casesDirectory}.`);
+  const manifestDir = path.dirname(path.resolve(manifestPath));
+  const seen = new Set<string>();
+  for (const entry of manifest.cases) {
+    if (!entry.file || !entry.caseId || !entry.split || !/^[a-f0-9]{64}$/i.test(entry.sha256)) throw new Error(`Invalid benchmark manifest entry for ${entry.caseId ?? "unknown"}.`);
+    if (seen.has(entry.caseId)) throw new Error(`Duplicate benchmark manifest case: ${entry.caseId}`);
+    seen.add(entry.caseId);
+    const file = path.resolve(manifestDir, entry.file);
+    if (file !== manifestDir && !file.startsWith(`${manifestDir}${path.sep}`)) throw new Error(`Benchmark manifest escapes its directory: ${entry.file}`);
+    const parsed = JSON.parse(await fs.readFile(file, "utf8")) as BenchmarkCase;
+    const actual = createHash("sha256").update(await fs.readFile(file)).digest("hex");
+    if (actual.toLowerCase() !== entry.sha256.toLowerCase()) throw new Error(`Benchmark case hash mismatch: ${entry.file}`);
+    if (parsed.caseId !== entry.caseId || parsed.split !== entry.split) throw new Error(`Benchmark manifest metadata mismatch: ${entry.file}`);
+    if (!cases.some((item) => item.caseId === entry.caseId)) throw new Error(`Benchmark manifest references an unselected case: ${entry.caseId}`);
+  }
 }
 
 async function runCase(item: BenchmarkCase, options: BenchmarkOptions = {}): Promise<BenchmarkCaseResult> {
@@ -166,7 +195,9 @@ async function runCase(item: BenchmarkCase, options: BenchmarkOptions = {}): Pro
 }
 
 export async function runBenchmark(directory: string, split?: string, options: BenchmarkOptions = {}): Promise<BenchmarkReport> {
-  const cases = (await loadCases(directory)).filter((item) => !split || item.split === split);
+  const allCases = await loadCases(directory);
+  if (options.manifestPath) await verifyBenchmarkManifest(directory, allCases, options.manifestPath);
+  const cases = allCases.filter((item) => !split || item.split === split);
   if (cases.length === 0) throw new Error(`No benchmark cases found${split ? ` for split ${split}` : ""}.`);
   const results: BenchmarkCaseResult[] = [];
   for (const item of cases) results.push(await runCase(item, options));

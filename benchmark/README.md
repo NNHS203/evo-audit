@@ -42,6 +42,7 @@ Run the deterministic baseline over the checked-in cases:
 evo-audit benchmark ./benchmark/cases
 evo-audit benchmark ./benchmark/cases --split development --json
 evo-audit benchmark ./benchmark/cases --split development \
+  --manifest ./benchmark/benchmark-manifest.json \
   --min-recall 1 --min-precision 1 --max-fpr 0
 
 # Optional: run the same cases through a configured API/OAuth model worker.
@@ -72,3 +73,7 @@ Model-backed mode reuses the same task protocol, local prompt cache, receipt
 deduplication, and global token budget as a normal review. It still does not
 turn worker output into a reportable vulnerability: a separate validator run
 is required for `T2_REPRODUCIBLE` evidence.
+
+`benchmark/benchmark-manifest.json` pins every checked-in case by SHA-256,
+split, and case ID. Passing `--manifest` makes accidental case drift fail
+closed before metrics are computed.

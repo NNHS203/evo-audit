@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "benchmarkVersion": "evo-audit-0.1.0",
+  "cases": [
+    {
+      "file": "cases/js-command-injection.json",
+      "caseId": "js-command-injection-basic-001",
+      "split": "holdout-example",
+      "sha256": "d2624dac4bdcdc9e3f200c9931e5fa68f79df7fa4d8c298863c640c01f3ff078"
+    },
+    {
+      "file": "cases/js-command-injection-indirect.json",
+      "caseId": "js-command-injection-indirect-001",
+      "split": "development",
+      "sha256": "5f2007fae3621ee3f1a07c56cd90feb19c801b7ea857944e48802b5310e8bb11"
+    },
+    {
+      "file": "cases/js-command-injection-interprocedural.json",
+      "caseId": "js-command-injection-interprocedural-001",
+      "split": "development",
+      "sha256": "26beaf7cf3215660977dc22dd85407656f85347c6eb1b24fcbbe8f70261a54ff"
+    },
+    {
+      "file": "cases/js-command-safe-fixed.json",
+      "caseId": "js-command-safe-fixed-001",
+      "split": "development",
+      "sha256": "e15d86f5e9a167aa94bc9d4bdefdf4a7211d026d00f63d946d1b484833c7ce4b"
+    },
+    {
+      "file": "cases/js-dynamic-safe-constant.json",
+      "caseId": "js-dynamic-safe-constant-001",
+      "split": "development",
+      "sha256": "2047c6ea144c736974981bdc98fff81075580c6cce5b25670ac78eb0ec4ad553"
+    }
+  ],
+  "notes": [
+    "The holdout case is not used by the development CI acceptance gate.",
+    "Update this manifest only when a benchmark revision is intentionally reviewed."
+  ]
+}

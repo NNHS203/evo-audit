@@ -180,7 +180,8 @@ held-out evaluator. Workers receive compact AST graph slices instead of entire
 repositories. Playbook changes should be evaluated on held-out cases before
 they are accepted.
 
-The benchmark contract is documented in [`benchmark/README.md`](benchmark/README.md).
+The benchmark contract is documented in [`benchmark/README.md`](benchmark/README.md),
+with external comparison rules in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 The workflow rationale and research references are documented in
 [`docs/WORKFLOW.md`](docs/WORKFLOW.md).
 
