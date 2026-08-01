@@ -109,6 +109,56 @@ const defaultRules: PlaybookRule[] = [
     globs: ["**/*.py"],
     enabled: true,
   },
+  {
+    id: "PY-XXE-001",
+    title: "Untrusted XML reaches an unsafe Python parser",
+    description:
+      "Request-controlled XML reaches an XML parser or entity-capable configuration. External entities and network access require independent validation.",
+    severity: "HIGH",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.py"],
+    enabled: true,
+  },
+  {
+    id: "PY-UNSAFE-DESERIALIZATION-001",
+    title: "Untrusted data reaches unsafe Python deserialization",
+    description:
+      "User-controlled bytes reach pickle, marshal, or an unsafe YAML loader. A validator must prove object construction or execution impact.",
+    severity: "CRITICAL",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.py"],
+    enabled: true,
+  },
+  {
+    id: "PY-PATH-TRAVERSAL-001",
+    title: "Request-controlled path reaches a Python file sink",
+    description:
+      "An external path reaches open or file-serving code without a proven containment policy.",
+    severity: "HIGH",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.py"],
+    enabled: true,
+  },
+  {
+    id: "PY-HARDCODED-CREDENTIAL-001",
+    title: "Credential-like literal in Python source",
+    description:
+      "Secret-shaped literals in Python source may be active credentials. Rotate and verify their deployment boundary before closing the obligation.",
+    severity: "HIGH",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.py"],
+    enabled: true,
+  },
+  {
+    id: "PY-DEBUG-MODE-001",
+    title: "Python application debug mode enabled",
+    description:
+      "Debug mode can expose stack traces and interactive tooling. Deployment configuration must be checked before treating this as exploitable.",
+    severity: "MEDIUM",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.py"],
+    enabled: true,
+  },
 ];
 
 export const defaultPlaybook: AuditPlaybook = {

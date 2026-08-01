@@ -258,6 +258,11 @@ function ruleAliases(ruleId: string): string[] {
   if (ruleId.includes("OPEN-REDIRECT")) return ["CWE-601"];
   if (ruleId.includes("SSRF")) return ["CWE-918"];
   if (ruleId.includes("SSTI")) return ["CWE-1336"];
+  if (ruleId.includes("XXE")) return ["CWE-611"];
+  if (ruleId.includes("UNSAFE-DESERIALIZATION")) return ["CWE-502"];
+  if (ruleId.includes("PATH-TRAVERSAL")) return ["CWE-22"];
+  if (ruleId.includes("HARDCODED-CREDENTIAL")) return ["CWE-798", "CWE-259", "CWE-321"];
+  if (ruleId.includes("DEBUG-MODE")) return ["CWE-215", "CWE-489", "CWE-16"];
   return [];
 }
 

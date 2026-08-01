@@ -572,7 +572,7 @@ function locationFor(node: CodeGraphNode): SourceLocation {
 }
 
 function ruleForSink(playbook: AuditPlaybook, kind: string, file: string): PlaybookRule | undefined {
-  const suffix = kind === "DYNAMIC_CODE" ? "DYNAMIC-CODE" : kind === "COMMAND_EXECUTION" ? "COMMAND-INJECTION" : kind === "QUERY_EXECUTION" ? "SQL-INJECTION" : kind === "REDIRECT" ? "OPEN-REDIRECT" : kind === "SSTI" ? "SSTI" : kind === "OUTBOUND_REQUEST" ? "SSRF" : undefined;
+  const suffix = kind === "DYNAMIC_CODE" ? "DYNAMIC-CODE" : kind === "COMMAND_EXECUTION" ? "COMMAND-INJECTION" : kind === "QUERY_EXECUTION" ? "SQL-INJECTION" : kind === "REDIRECT" ? "OPEN-REDIRECT" : kind === "SSTI" ? "SSTI" : kind === "OUTBOUND_REQUEST" ? "SSRF" : kind === "XML_PARSE" ? "XXE" : kind === "UNSAFE_DESERIALIZATION" ? "UNSAFE-DESERIALIZATION" : kind === "PATH_FILE" ? "PATH-TRAVERSAL" : undefined;
   if (!suffix) return undefined;
   const extension = file.slice(file.lastIndexOf(".")).toLowerCase();
   return playbook.rules.find((rule) => rule.enabled && rule.id.includes(suffix) && rule.globs.some((glob) => glob.endsWith(extension)))
@@ -604,6 +604,21 @@ function findingText(kind: string): Pick<Finding, "rootCause" | "impact" | "reme
     rootCause: "An AST-traced boundary input reaches an outbound request sink.",
     impact: "An attacker may cause server-side requests to internal or restricted destinations if URL policy is incomplete.",
     remediation: "Use an allowlist of schemes, hosts, ports, and resolved IP ranges, then verify redirects and DNS rebinding are rejected.",
+  };
+  if (kind === "XML_PARSE") return {
+    rootCause: "An AST-traced boundary input reaches an XML parser configuration or parse sink.",
+    impact: "An attacker may resolve external entities or trigger server-side requests if entity and network controls are unsafe.",
+    remediation: "Disable external entities and network access, use a hardened parser profile, and verify a local-file/SSRF entity is rejected.",
+  };
+  if (kind === "UNSAFE_DESERIALIZATION") return {
+    rootCause: "An AST-traced boundary input reaches a Python object deserialization sink.",
+    impact: "An attacker may instantiate unexpected objects or execute code when a pickle/YAML loader accepts untrusted bytes.",
+    remediation: "Use a safe data-only format and loader, enforce a schema, and verify malicious object tags are rejected.",
+  };
+  if (kind === "PATH_FILE") return {
+    rootCause: "An AST-traced boundary input reaches a file path or file-serving sink.",
+    impact: "An attacker may read or serve files outside the intended directory if path normalization and containment are incomplete.",
+    remediation: "Resolve and enforce directory containment after normalization, reject traversal and symlink escapes, and add a regression test.",
   };
   return {
     rootCause: "An AST-traced boundary input reaches an outbound redirect sink.",

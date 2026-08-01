@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "caseId": "python-path-safe-constant-001",
+  "split": "development",
+  "language": "python",
+  "file": "files.py",
+  "code": "def read_banner():\n    with open('/srv/app/banner.txt', 'r', encoding='utf8') as handle:\n        return handle.read()\n",
+  "property": "A fixed application path is not an external path traversal flow.",
+  "expected": {
+    "vulnerable": false,
+    "ruleId": "PY-PATH-TRAVERSAL-001"
+  },
+  "notes": [
+    "False-positive trap for a file sink with a constant path."
+  ]
+}

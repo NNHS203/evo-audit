@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "caseId": "python-xxe-001",
+  "split": "development",
+  "language": "python",
+  "file": "xml_app.py",
+  "code": "from flask import request\nfrom lxml import etree\n\ndef parse():\n    xml = request.data\n    return etree.fromstring(xml)\n",
+  "property": "Request-controlled XML reaches an entity-capable parser call.",
+  "expected": {
+    "vulnerable": true,
+    "ruleId": "PY-XXE-001",
+    "minimumReportableEvidence": "T2_REPRODUCIBLE"
+  },
+  "notes": [
+    "The static graph is only a candidate; parser flags and runtime behavior require validation."
+  ]
+}

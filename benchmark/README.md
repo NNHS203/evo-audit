@@ -59,7 +59,9 @@ evo-audit realvuln ./Real-Vuln-Benchmark \
   realvuln-damn-vulnerable-flask-application --output ./realvuln-runs
 ```
 
-The runner creates an isolated temporary workspace for each case, records the
+The checked-in development track covers JavaScript/TypeScript and Python
+source-to-sink cases, including explicit safe traps. The runner creates an
+isolated temporary workspace for each case, records the
 candidate result, and removes that workspace after the case. It reports
 candidate recall/precision, false-positive rate on explicitly labeled safe
 traps, unknown-coverage rate, and tokens per case. These are discovery metrics;

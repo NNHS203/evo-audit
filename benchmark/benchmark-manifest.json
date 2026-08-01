@@ -55,6 +55,30 @@
       "caseId": "python-sql-interprocedural-001",
       "split": "development",
       "sha256": "9418420d78a0b14bb20a0f57a68253a563e0e2f8f8c2534b34cdba064e1286a5"
+    },
+    {
+      "file": "cases/python-xxe-001.json",
+      "caseId": "python-xxe-001",
+      "split": "development",
+      "sha256": "2000e32e6d5318fc3c259b8b4d84f06276a395a86782444635db12a373d3a29f"
+    },
+    {
+      "file": "cases/python-path-safe-constant-001.json",
+      "caseId": "python-path-safe-constant-001",
+      "split": "development",
+      "sha256": "23d4cc7da24817cf56f2b7578b8ecd5ecef87583f1e7c1c31e9e5b0146260c89"
+    },
+    {
+      "file": "cases/python-static-risks-001.json",
+      "caseId": "python-static-risks-001",
+      "split": "development",
+      "sha256": "51e53a8466ae9de19a8dd777539d0258fdcf6e972f8c31d634388533e237cc1a"
+    },
+    {
+      "file": "cases/python-ssti-template-001.json",
+      "caseId": "python-ssti-template-001",
+      "split": "development",
+      "sha256": "1950a7318cf9f01244f30e26727c3634e435c2ce6e7a816cdb45d47a937f5cbc"
     }
   ],
   "notes": [

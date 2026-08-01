@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "caseId": "python-static-risks-001",
+  "split": "development",
+  "language": "python",
+  "file": "config.py",
+  "code": "from flask import Flask\napp = Flask(__name__)\napp.secret_key = 'rotate-me'\napp.debug = True\n",
+  "property": "Credential-shaped literals and debug mode are explicit static security obligations.",
+  "expected": {
+    "vulnerable": true,
+    "ruleId": "PY-HARDCODED-CREDENTIAL-001",
+    "minimumReportableEvidence": "T2_REPRODUCIBLE"
+  },
+  "notes": [
+    "The case may emit two candidate obligations; matching is based on the expected rule."
+  ]
+}

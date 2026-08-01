@@ -40,11 +40,14 @@ const sourcePattern = /\b(?:request|req|ctx|context)\s*\.\s*(?:args|form|values|
 
 const sinkPatterns: Array<{ kind: string; pattern: RegExp }> = [
   { kind: "DYNAMIC_CODE", pattern: /\b(?:eval|exec)\s*\(/gi },
-  { kind: "COMMAND_EXECUTION", pattern: /\b(?:os\s*\.\s*(?:system|popen)|subprocess\s*\.\s*(?:run|Popen|call|check_call|check_output|getoutput|getstatusoutput))\s*\(/gi },
+  { kind: "COMMAND_EXECUTION", pattern: /\b(?:os\s*\.\s*(?:system|popen)|(?:popen|system)|subprocess\s*\.\s*(?:run|Popen|call|check_call|check_output|getoutput|getstatusoutput))\s*\(/gi },
   { kind: "QUERY_EXECUTION", pattern: /\b(?:execute|executemany|executescript)\s*\(/gi },
   { kind: "SSTI", pattern: /\b(?:render_template_string|jinja2\s*\.\s*(?:Template|Environment)|Template)\s*\(/gi },
   { kind: "REDIRECT", pattern: /\b(?:redirect|flask\s*\.\s*redirect)\s*\(/gi },
   { kind: "OUTBOUND_REQUEST", pattern: /\b(?:requests|httpx|urllib\s*\.\s*request|urlopen)\s*\.\s*(?:get|post|put|patch|request|urlopen)\s*\(/gi },
+  { kind: "XML_PARSE", pattern: /\b(?:etree\s*\.\s*(?:XMLParser|fromstring|parse)|XMLParser|fromstring)\s*\(/gi },
+  { kind: "UNSAFE_DESERIALIZATION", pattern: /\b(?:pickle|marshal|yaml)\s*\.\s*(?:loads|load)\s*\(/gi },
+  { kind: "PATH_FILE", pattern: /\b(?:open|send_file|send_from_directory)\s*\(/gi },
 ];
 
 const guardPattern = /\b(?:sanitize|sanitise|validate|allowlist|allow_list|escape|safe_join|authorize|authorise|permission|is_safe|parameterized|parameterised)\s*\(/i;
@@ -281,6 +284,7 @@ function buildPythonFile(state: FragmentState, file: FileFingerprint, content: s
   ];
   for (const scope of scopes) {
     const stateByName: TaintState = { origins: new Map(), parameters: new Map() };
+    const pendingTemplates = new Map<string, number>();
     for (const parameter of scope.parameters) {
       stateByName.parameters.set(parameter, new Set([parameter]));
       if (boundaryParameter(parameter) && scope.function) {
@@ -293,7 +297,12 @@ function buildPythonFile(state: FragmentState, file: FileFingerprint, content: s
       const masked = lines[lineIndex] ?? "";
       const raw = rawLines[lineIndex] ?? "";
       if (!scope.function && functions.some((fn) => lineIndex >= fn.line - 1 && lineIndex < fn.endLine)) continue;
-      if (!masked.trim() || functionNameAndParameters(masked)) continue;
+      if (!masked.trim() && pendingTemplates.size === 0 || functionNameAndParameters(masked)) continue;
+      for (const [templateName, startLine] of pendingTemplates) {
+        const embeddedOrigins = [...new Set(namesIn(raw, stateByName.origins.keys()).flatMap((name) => [...(stateByName.origins.get(name) ?? [])]))];
+        if (embeddedOrigins.length > 0) stateByName.origins.set(templateName, new Set(embeddedOrigins));
+        if (lineIndex > startLine && /(?:'''|\"\"\")/.test(raw)) pendingTemplates.delete(templateName);
+      }
       const currentFunction = scope.function;
       const controls: string[] = [];
       if (guardPattern.test(masked)) {
@@ -320,7 +329,10 @@ function buildPythonFile(state: FragmentState, file: FileFingerprint, content: s
           stateByName.parameters.set(name, parameters);
           for (const origin of origins) addEdge(state, { from: origin, to: variableId, kind: "DATA_FLOW", confidence: "HIGH" });
         }
+        if (/(?:'''|\"\"\")/.test(raw)) pendingTemplates.set(name, lineIndex);
       }
+
+      if (!masked.trim()) continue;
 
       for (const sink of sinkMatches(masked)) {
         const callNodeId = addNode(state, normalizedFile, lineIndex + 1, sink.index + 1, "CALL", sink.text.replace(/\s*\($/, ""), "Python call expression discovered by the source-to-sink graph.", raw);

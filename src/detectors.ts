@@ -113,7 +113,7 @@ function matchesRule(rule: PlaybookRule, relativePath: string): boolean {
   return rule.globs.some((glob) => glob.endsWith(ext));
 }
 
-function findMatch(rule: PlaybookRule, line: string): Omit<DetectorMatch, "rule" | "line" | "column" | "snippet"> | null {
+function findMatch(rule: PlaybookRule, line: string, rawLine = line): Omit<DetectorMatch, "rule" | "line" | "column" | "snippet"> | null {
   if (rule.id === "PY-DYNAMIC-CODE-001" && /\b(?:eval|exec)\s*\(/.test(line) && new RegExp(pythonRequestInput, "i").test(line)) {
     return {
       rootCause: "A Python dynamic code execution boundary is present.",
@@ -171,6 +171,26 @@ function findMatch(rule: PlaybookRule, line: string): Omit<DetectorMatch, "rule"
       remediation: "Use same-origin defaults or an explicit destination allowlist and verify external destinations are rejected.",
       kind: "SOURCE_TO_SINK",
       limitation: "This pass does not resolve guards in middleware or helper functions.",
+    };
+  }
+
+  if (rule.id === "PY-HARDCODED-CREDENTIAL-001" && /\b(?:secret[_-]?key|password|passwd|token|api[_-]?key|private[_-]?key)\b\s*=\s*['"][^'"]+['"]/i.test(rawLine)) {
+    return {
+      rootCause: "A credential-like value is hardcoded in Python source.",
+      impact: "Anyone who obtains the source may forge sessions, access an external service, or reuse the secret elsewhere.",
+      remediation: "Load secrets from a managed runtime secret boundary, rotate the exposed value, and add a check that rejects literals in source.",
+      kind: "CUSTOM",
+      limitation: "Static matching identifies a credential-shaped literal but cannot determine whether it is a harmless fixture or an active secret.",
+    };
+  }
+
+  if (rule.id === "PY-DEBUG-MODE-001" && /\b(?:app|application)\s*\.\s*debug\s*=\s*True\b/.test(line)) {
+    return {
+      rootCause: "Python application debug mode is enabled in source.",
+      impact: "Production errors may expose source, locals, stack traces, or an interactive debugger.",
+      remediation: "Disable debug mode in deployed configuration and enforce a production-safe startup check.",
+      kind: "CUSTOM",
+      limitation: "The static pass cannot determine deployment environment or whether a later configuration overrides this assignment.",
     };
   }
 
@@ -248,7 +268,7 @@ export function detectFindings(
     const codeLine = codeLines[index] ?? "";
     for (const rule of playbook.rules) {
       if (!matchesRule(rule, relativePath)) continue;
-      const match = findMatch(rule, codeLine);
+      const match = findMatch(rule, codeLine, line);
       if (!match) continue;
 
       const column = Math.max(0, line.search(/\S/));

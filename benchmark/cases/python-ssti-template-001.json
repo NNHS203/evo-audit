@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "caseId": "python-ssti-template-001",
+  "split": "development",
+  "language": "python",
+  "file": "template_app.py",
+  "code": "from flask import request, render_template_string\n\ndef greet():\n    name = request.form.get('name')\n    template = \"\"\"<h1>%s</h1>\"\"\" % name\n    return render_template_string(template)\n",
+  "property": "Request input is interpolated into a template source before rendering.",
+  "expected": {
+    "vulnerable": true,
+    "ruleId": "PY-SSTI-001",
+    "minimumReportableEvidence": "T2_REPRODUCIBLE"
+  },
+  "notes": [
+    "Exercises multiline template propagation and a template sink."
+  ]
+}
