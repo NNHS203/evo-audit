@@ -1091,6 +1091,23 @@ test("Python framework policies distinguish deployment settings, auth cookies, a
     "    def mutate(self, info, username, password):",
     "        return User.authenticate(username, password)",
   ].join("\n"), "utf8");
+  await writeFile(path.join(root, "graphql_idor.py"), [
+    "import graphene",
+    "class EditPaste(graphene.Mutation):",
+    "    class Arguments:",
+    "        id = graphene.Int(required=True)",
+    "        title = graphene.String(required=False)",
+    "    def mutate(self, info, id, title=None):",
+    "        paste = Paste.query.filter_by(id=id).first()",
+    "        Paste.query.filter_by(id=id).update(title=title)",
+    "        return EditPaste(paste=paste)",
+    "class SafeEditPaste(graphene.Mutation):",
+    "    class Arguments:",
+    "        id = graphene.Int(required=True)",
+    "    def mutate(self, info, id):",
+    "        paste = Paste.query.filter_by(id=id, owner=info.context.user).first()",
+    "        return SafeEditPaste(paste=paste)",
+  ].join("\n"), "utf8");
   await writeFile(path.join(root, "tornado_auth.py"), [
     "import tornado.web",
     "class LoginHandler(tornado.web.RequestHandler):",
@@ -1205,6 +1222,8 @@ test("Python framework policies distinguish deployment settings, auth cookies, a
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "TEMPLATE-UNSAFE-OUTPUT-001" && finding.locations.some((location) => location.file === "templates/unsafe.html")), true);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "TEMPLATE-UNSAFE-OUTPUT-001" && finding.locations.some((location) => location.file === "templates/escaped.html")), false);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-IDOR-001"), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-IDOR-001" && finding.locations.some((location) => location.file === "graphql_idor.py" && location.line === 7)), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-IDOR-001" && finding.locations.some((location) => location.file === "graphql_idor.py" && location.line === 14)), false);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-RATE-LIMIT-001" && finding.locations.some((location) => location.file === "auth.py")), true);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-RATE-LIMIT-001" && finding.locations.some((location) => location.file === "auth.py" && location.line >= 7)), false);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-RATE-LIMIT-001" && finding.locations.some((location) => location.file === "graphql_auth.py")), true);

@@ -980,6 +980,30 @@ function pythonIdorLines(content: string, playbook: AuditPlaybook): Map<number, 
   return result;
 }
 
+function pythonGraphqlIdorLines(content: string, playbook: AuditPlaybook): Map<number, string[]> {
+  const result = new Map<number, string[]>();
+  const rule = playbook.rules.find((candidate) => candidate.id === "PY-IDOR-001" && candidate.enabled);
+  if (!rule || !/\bgraphene\s*\.\s*Mutation\b/i.test(content)) return result;
+  const lines = maskPython(content).split(/\r?\n/);
+  const blocks = pythonPolicyBlocks(content);
+  for (const block of blocks) {
+    if (!/^mutate$/i.test(block.name) || !/\b(?:id|pk|[A-Za-z_]\w*_id)\b/.test(block.body)) continue;
+    for (let index = block.startLine - 1; index < block.endLine; index += 1) {
+      const line = lines[index] ?? "";
+      const lookup = line.match(/\b(?:[A-Za-z_]\w*\s*\.\s*)?(?:objects|query)\s*\.\s*(?:filter_by|filter|get)\s*\(([^)]*)\)/i);
+      if (!lookup || !/\b(?:id|pk|[A-Za-z_]\w*_id)\s*=\s*(?:id|pk|[A-Za-z_]\w*_id)\b/i.test(lookup[1])) continue;
+      const ownerBinding = /\b(?:owner|author|created_by|user|account|tenant|organization)(?:_id)?\s*=/i.test(lookup[1])
+        || /\b(?:owner|author|created_by|user|account|tenant|organization)(?:_id)?\b[^\n]{0,120}\b(?:current_user|info\s*\.\s*context\s*\.\s*user|request\s*\.\s*user|principal)\b/i.test(block.body)
+        || /\b(?:current_user|info\s*\.\s*context\s*\.\s*user|request\s*\.\s*user|principal)\b[^\n]{0,120}\b(?:owner|author|created_by|user|account|tenant|organization)(?:_id)?\b/i.test(block.body);
+      if (!ownerBinding) {
+        result.set(index + 1, [rule.id]);
+        break;
+      }
+    }
+  }
+  return result;
+}
+
 function policyMatch(ruleId: string): Omit<DetectorMatch, "rule" | "line" | "column" | "snippet"> | null {
   if (ruleId === "PY-MISSING-AUTH-001") return {
     rootCause: "A dangerous Python route is reachable without an observed authentication or authorization guard.",
@@ -1021,7 +1045,7 @@ function policyMatch(ruleId: string): Omit<DetectorMatch, "rule" | "line" | "col
     impact: "An authenticated user may read or modify another user's object by changing an identifier in the request.",
     remediation: "Bind object lookup to the authenticated principal and add an authorization regression test for a foreign identifier.",
     kind: "AUTHORIZATION_BOUNDARY",
-    limitation: "The static pass only promoted an identifier lookup inside an explicitly vulnerable branch; complete authorization still requires independent validation.",
+    limitation: "The static pass promotes identifier lookups inside explicit vulnerable branches and Graphene mutations; complete ownership and authorization still require independent validation.",
   };
   if (ruleId === "PY-MASS-ASSIGNMENT-001") return {
     rootCause: "Request-derived fields appear to be expanded into a model update without an observed privileged-field allowlist.",
@@ -1127,6 +1151,7 @@ export function detectFindings(
     for (const [lineNumber, ruleIds] of pythonFrameworkPolicyLines(relativePath, content, playbook)) pythonPolicyMatches.set(lineNumber, [...new Set([...(pythonPolicyMatches.get(lineNumber) ?? []), ...ruleIds])]);
     for (const [lineNumber, ruleIds] of pythonRegexDosLines(content, playbook)) pythonPolicyMatches.set(lineNumber, [...new Set([...(pythonPolicyMatches.get(lineNumber) ?? []), ...ruleIds])]);
     for (const [lineNumber, ruleIds] of pythonIdorLines(content, playbook)) pythonPolicyMatches.set(lineNumber, [...new Set([...(pythonPolicyMatches.get(lineNumber) ?? []), ...ruleIds])]);
+    for (const [lineNumber, ruleIds] of pythonGraphqlIdorLines(content, playbook)) pythonPolicyMatches.set(lineNumber, [...new Set([...(pythonPolicyMatches.get(lineNumber) ?? []), ...ruleIds])]);
     for (const [lineNumber, ruleIds] of pythonSensitiveExposureLines(content, playbook)) pythonPolicyMatches.set(lineNumber, [...new Set([...(pythonPolicyMatches.get(lineNumber) ?? []), ...ruleIds])]);
     for (const [lineNumber, ruleIds] of pythonWeakHashLines(content, playbook)) pythonPolicyMatches.set(lineNumber, [...new Set([...(pythonPolicyMatches.get(lineNumber) ?? []), ...ruleIds])]);
     for (const [lineNumber, ruleIds] of pythonSqlInterpolationLines(content, playbook)) pythonPolicyMatches.set(lineNumber, [...new Set([...(pythonPolicyMatches.get(lineNumber) ?? []), ...ruleIds])]);
