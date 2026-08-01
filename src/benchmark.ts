@@ -141,7 +141,8 @@ async function runCase(item: BenchmarkCase, options: BenchmarkOptions = {}): Pro
     const matchingCandidate = item.expected.ruleId
       ? run.findings.some((finding) => finding.ruleId === item.expected.ruleId)
       : candidateFound;
-    const reportableFinding = (run.reportableFindingIds ?? []).some((id) => run.findings.some((finding) => finding.id === id));
+    const reportableIds = new Set(run.reportableFindingIds ?? []);
+    const reportableFinding = run.findings.some((finding) => reportableIds.has(finding.id) && (!item.expected.ruleId || finding.ruleId === item.expected.ruleId));
     const unsupportedClaim = run.findings.some((finding) => finding.status === "VERIFIED" && finding.evidenceTier !== "T2_REPRODUCIBLE");
     return {
       caseId: item.caseId,
