@@ -1082,6 +1082,37 @@ test("Python framework policies distinguish deployment settings, auth cookies, a
     "def authenticate_helper(input_email, input_password):",
     "    return User.find_by_email(input_email)",
   ].join("\n"), "utf8");
+  await writeFile(path.join(root, "fastapi_auth.py"), [
+    "from fastapi import APIRouter",
+    "router = APIRouter()",
+    "@router.post('/login')",
+    "def login(body: LoginRequest):",
+    "    return authenticate(body.email, body.password)",
+  ].join("\n"), "utf8");
+  await writeFile(path.join(root, "django_auth.py"), [
+    "from django.views.decorators.http import require_http_methods",
+    "@require_http_methods(['GET', 'POST'])",
+    "def login_view(request):",
+    "    form = LoginForm(data=request.POST or None)",
+    "    return authenticate(form.data.get('email'), form.data.get('password'))",
+  ].join("\n"), "utf8");
+  await writeFile(path.join(root, "identity_ping.py"), [
+    "def identity_ping(request):",
+    "    handle = request.POST.get('handle') or request.GET.get('handle')",
+    "    return {'status': 'queued', 'handle': handle}",
+  ].join("\n"), "utf8");
+  await writeFile(path.join(root, "fastapi_profile.py"), [
+    "from fastapi import APIRouter",
+    "router = APIRouter()",
+    "@router.post('/profile')",
+    "def update_profile(body: ProfileRequest):",
+    "    return {'email': body.email}",
+  ].join("\n"), "utf8");
+  await writeFile(path.join(root, "client_login.py"), [
+    "def login(client, email):",
+    "    response = client.post('/login', json={'email': email})",
+    "    return response.status_code",
+  ].join("\n"), "utf8");
   await writeFile(path.join(root, "graphql_auth.py"), [
     "import graphene",
     "class Login(graphene.Mutation):",
@@ -1247,6 +1278,11 @@ test("Python framework policies distinguish deployment settings, auth cookies, a
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-MASS-ASSIGNMENT-001" && finding.locations.some((location) => location.file === "mass_safe.py")), false);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-RATE-LIMIT-001" && finding.locations.some((location) => location.file === "auth.py")), true);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-RATE-LIMIT-001" && finding.locations.some((location) => location.file === "auth.py" && location.line >= 7)), false);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-RATE-LIMIT-001" && finding.locations.some((location) => location.file === "fastapi_auth.py")), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-RATE-LIMIT-001" && finding.locations.some((location) => location.file === "django_auth.py")), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-RATE-LIMIT-001" && finding.locations.some((location) => location.file === "identity_ping.py")), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-RATE-LIMIT-001" && finding.locations.some((location) => location.file === "fastapi_profile.py")), false);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-RATE-LIMIT-001" && finding.locations.some((location) => location.file === "client_login.py")), false);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-RATE-LIMIT-001" && finding.locations.some((location) => location.file === "graphql_auth.py")), true);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-RATE-LIMIT-001" && finding.locations.some((location) => location.file === "tornado_auth.py" && location.line === 3)), true);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-RATE-LIMIT-001" && finding.locations.some((location) => location.file === "tornado_auth.py" && location.line === 8)), false);
