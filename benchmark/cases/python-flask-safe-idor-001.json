@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "caseId": "framework-flask-safe-idor-001",
+  "split": "framework-holdout",
+  "language": "python",
+  "files": [
+    {
+      "path": "notes.py",
+      "code": "from flask import Flask\n\napp = Flask(__name__)\n\n@app.get('/notes/<int:note_id>')\n@login_required\ndef get_note(note_id):\n    with Session() as session:\n        note = session.get(Note, note_id)\n        if note.user_id != current_user.id:\n            abort(403)\n        return note\n"
+    }
+  ],
+  "property": "An authenticated Flask route binds a note lookup to the current user before returning it.",
+  "expected": { "vulnerable": false },
+  "notes": ["Negative control: an explicit owner comparison should suppress the candidate."]
+}

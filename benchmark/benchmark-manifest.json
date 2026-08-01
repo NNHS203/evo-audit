@@ -135,6 +135,30 @@
       "sha256": "eb7f2de6d5ac06bab6c24ce076a09f80e0eb5e9eb9d2763ada167a1012312b08"
     },
     {
+      "file": "cases/python-flask-idor-001.json",
+      "caseId": "framework-flask-idor-001",
+      "split": "framework-holdout",
+      "sha256": "6d6ecc68989d363fd8d9cb3b1483aec8a06834733240c2cebd4ca5ac99ab4afb"
+    },
+    {
+      "file": "cases/python-flask-safe-idor-001.json",
+      "caseId": "framework-flask-safe-idor-001",
+      "split": "framework-holdout",
+      "sha256": "3ecf9cfa8cac38f6b59398a6859f9de7a43afe954905e4436e70c620ee33a11f"
+    },
+    {
+      "file": "cases/python-fastapi-idor-001.json",
+      "caseId": "framework-fastapi-idor-001",
+      "split": "framework-holdout",
+      "sha256": "b91d4e57c809d12d4f3e86ed1d4caf2d93abf65dc34cdf5340124595ea67be59"
+    },
+    {
+      "file": "cases/python-fastapi-safe-idor-001.json",
+      "caseId": "framework-fastapi-safe-idor-001",
+      "split": "framework-holdout",
+      "sha256": "e82bb9db156cb99a4e35f103c9180ac8d8061b468ce2d911be5bcb3fdfd0f491"
+    },
+    {
       "file": "cases/js-express-command-001.json",
       "caseId": "framework-express-command-001",
       "split": "framework-holdout",

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "caseId": "framework-flask-idor-001",
+  "split": "framework-holdout",
+  "language": "python",
+  "files": [
+    {
+      "path": "notes.py",
+      "code": "from flask import Flask\n\napp = Flask(__name__)\n\n@app.get('/notes/<int:note_id>')\n@login_required\ndef get_note(note_id):\n    with Session() as session:\n        note = session.get(Note, note_id)\n        return note\n"
+    }
+  ],
+  "property": "An authenticated Flask route selects a note by a caller-controlled identifier without an observed owner constraint.",
+  "expected": { "vulnerable": true, "ruleId": "PY-IDOR-001" },
+  "notes": ["Framework holdout: direct object retrieval must retain an ownership boundary."]
+}

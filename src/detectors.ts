@@ -988,6 +988,59 @@ function pythonIdorLines(content: string, playbook: AuditPlaybook): Map<number, 
       || /(?:filter_by|filter)\s*\([^\n]*\bbook_title\s*=\s*str\s*\(\s*book_title\b/i.test(line);
     if (idor && vulnerableIndent !== null && indent > vulnerableIndent) result.set(index + 1, [rule.id]);
   }
+  // Route-aware IDOR pass: require an input object identifier, a sensitive object signal,
+  // and no local ownership/authorization evidence before emitting a candidate.
+  for (const block of pythonPolicyBlocks(content)) {
+    const signature = block.body.split(/\r?\n/)[0] ?? "";
+    const route = /@[^\n]*\b(?:route|get|post|put|patch|delete|api_route)\s*\(/i.test(block.decorators);
+    const routeMethod = block.decorators.match(/\b(?:route|api_route|get|post|put|patch|delete)\s*\(/i)?.[0]?.split("(")[0]?.toLowerCase() ?? "";
+    const actionPath = /["'][^"']*\/(?:delete|remove|update|edit|modify|status|assign|revoke|cancel)\b/i.test(block.decorators)
+      || /^(?:update|delete|remove|edit|modify|change|reset|assign|revoke|cancel)_[A-Za-z_]*$/i.test(block.name);
+    if (/['"][^'"]*\/(?:flag|read|download)\b/i.test(block.decorators)) continue;
+    const pathIdentifier = /[<{]\s*(?:(?:int|uuid|str):\s*)?[A-Za-z_]\w*(?:_id|id|pk)\s*[>}]|\{\s*(?:id|pk|[A-Za-z_]\w*_id)\s*\}/i.test(block.decorators);
+    const signatureIdentifier = /\b(?:id|pk|[A-Za-z_]\w*_id)\b/i.test(signature);
+    const requestIdentifier = /\b(?:request|req)\s*\.\s*(?:args|form|json|values|query_params|path_params)\b[\s\S]{0,160}(?:id|pk|[A-Za-z_]\w*_id)\b/i.test(block.body)
+      || /\b(?:data|payload|body|form|params)\b[\s\S]{0,160}\b(?:id|pk|[A-Za-z_]\w*_id)\b/i.test(block.body);
+    const callerIdentifier = /\b(?:request|req)\s*\.\s*(?:args|form|json|values|query_params|path_params)\b[\s\S]{0,160}\b(?:user|account|owner|subject|tenant|customer|member|profile|resource|object|record|note|document|message|transaction|payment|payout|job|ticket|property|unit|lease|worker|dispute|application|borrower|book|paste)(?:_id|id)\b/i.test(block.body)
+      || /\b(?:data|payload|body|form|params)\b[\s\S]{0,160}\b(?:user|account|owner|subject|tenant|customer|member|profile|resource|object|record|note|document|message|transaction|payment|payout|job|ticket|property|unit|lease|worker|dispute|application|borrower|book|paste)(?:_id|id)\b/i.test(block.body);
+    const sensitivityName = block.name.replaceAll("_", " ");
+    const sensitivityBody = block.body.replace(/\b(?:current_user|curr_user|user|actor|current|principal|auth_user)\b/gi, " ");
+    const sensitiveObject = /\b(?:owner|author|created_by|account|tenant|customer|member|profile|resource|object|record|item|note|document|message|transaction|payment|payout|job|ticket|property|unit|lease|worker|dispute|application|borrower|book|paste|password|credential|token|secret|notification|attachment|api_key|webhook|organization)\b/i.test(sensitivityName)
+      || /\b(?:user|account|owner|subject|tenant|customer|member|profile|resource|object|record|note|document|message|transaction|payment|payout|job|ticket|property|unit|lease|worker|dispute|application|borrower|book|paste)(?:_id|id)\b/i.test(sensitivityBody)
+      || /\b(?:owner|author|created_by|account|tenant|customer|member|profile|resource|object|record|item|note|document|message|transaction|payment|payout|job|ticket|property|unit|lease|worker|dispute|application|borrower|book|paste|password|credential|token|secret)\b/i.test(sensitivityBody);
+    if (!route) continue;
+    if (routeMethod === "post" && !actionPath && !pathIdentifier) continue;
+    if (!pathIdentifier && !callerIdentifier) continue;
+    if (!sensitiveObject) continue;
+    const authenticated = /\b(?:login_required|token_required|requires_auth|current_user|curr_user|request\s*\.\s*user|g\s*\.\s*(?:user|session)|is_authenticated|Depends\s*\(\s*get_current_user|HTTPBearer|OAuth2)\b/i.test(`${block.decorators}\n${block.rawBody}`);
+    if (!authenticated) continue;
+    const genericPrincipal = /\b(?:user|actor|current)\b[^\n]{0,120}\bDepends\s*\(\s*(?:get_current_user|current_user)\b/i.test(block.body)
+      || /\b(?:user|actor|current)\s*=\s*(?:get_current_user|current_user)\s*\(/i.test(block.body);
+    const principal = genericPrincipal
+      ? "(?:current_user|curr_user|request\\s*\\.\\s*user|g\\s*\\.\\s*user|principal|auth_user|actor|user|current)"
+      : "(?:current_user|curr_user|request\\s*\\.\\s*user|g\\s*\\.\\s*user|principal|auth_user)";
+    const ownerField = "(?:owner|author|created_by|tenant|organization|user|sender|receiver|subject|requester|account|member|assignee|worker|customer)(?:_id)?";
+    const ownerBinding = new RegExp(`\\b${ownerField}\\s*(?:==|!=|=|is)\\s*${principal}\\b`, "i").test(block.body)
+      || new RegExp(`\\b[A-Za-z_]\\w*\\.(?:[A-Za-z_]\\w*(?:_id|id))\\s*(?:==|!=|is)\\s*${principal}\\s*\\.?\\s*(?:id|user_id)?\\b`, "i").test(block.body)
+      || new RegExp(`\\b${principal}\\s*\\.?\\s*(?:id|user_id)?\\s*(?:==|!=|is)\\s*[A-Za-z_]\\w*\\.(?:[A-Za-z_]\\w*(?:_id|id))\\b`, "i").test(block.body);
+    const moduleRoleBoundary = /\b(?:APIRouter|Router)\s*\([^)]*\bdependencies\s*=\s*\[[^\]]*\b(?:require_roles|require_role|require_admin|admin_only|admin_or_manager|require_staff|require_support|require_buyer|require_vendor)\b/i.test(content);
+    const authorizationHelper = /[A-Za-z_]*(?:can|check|assert|ensure|authorize|enforce|require)_[A-Za-z_]*\s*(?:\(|\b)/i.test(block.body)
+      || /\b(?:load|fetch)_[A-Za-z_]*(?:view|manage|access|dispatch|owned|scope)[A-Za-z_]*\s*\(/i.test(block.body)
+      || /\b(?:is_(?:owner|allowed|authorized|permitted)|admin_required)\s*\(/i.test(block.body)
+      || /\b(?:require_[A-Za-z_]*|admin_required|admin_only|admin_or_manager|manager_only|staff_only)\b/i.test(`${block.decorators}\n${block.body}`)
+      || moduleRoleBoundary
+      || /\b(?:status_code\s*=\s*(?:401|403)|HTTP_403_FORBIDDEN|abort\s*\(\s*403|PermissionDenied)\b/i.test(block.body);
+    if (ownerBinding || authorizationHelper) continue;
+    const bodyLines = block.body.split(/\r?\n/);
+    for (let offset = 0; offset < bodyLines.length; offset += 1) {
+      const window = bodyLines.slice(offset, offset + 4).join("\n");
+      const compactWindow = window.replace(/\s+/g, " ");
+      const lookup = /\b(?:query|objects)\s*\.\s*(?:get|filter|filter_by)\s*\([^)]*\b(?:id|pk|[A-Za-z_]\w*_id)\b|\b(?:session|db|db\s*\.\s*session|self\s*\.\s*session)\s*\.\s*(?:get|query)\s*\([^)]*\b(?:id|pk|[A-Za-z_]\w*_id)\b|\b(?:session|db|db\s*\.\s*session|self\s*\.\s*session)\s*\.\s*query\b.*\.\s*(?:get|filter|filter_by)\s*\([^)]*\b(?:id|pk|[A-Za-z_]\w*_id)\b/i.test(compactWindow);
+      if (!lookup || !(/\b(?:id|pk|[A-Za-z_]\w*_id)\b/i.test(window) || pathIdentifier || signatureIdentifier || requestIdentifier)) continue;
+      result.set(block.startLine + offset, [rule.id]);
+      break;
+    }
+  }
   return result;
 }
 

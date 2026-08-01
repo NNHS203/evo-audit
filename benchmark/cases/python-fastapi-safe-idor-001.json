@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "caseId": "framework-fastapi-safe-idor-001",
+  "split": "framework-holdout",
+  "language": "python",
+  "files": [
+    {
+      "path": "main.py",
+      "code": "from fastapi import APIRouter, Depends\n\nrouter = APIRouter()\n\n@router.get('/items/{item_id}')\ndef get_item(item_id: int, current_user=Depends(get_current_user), db=Depends(get_db)):\n    item = db.query(Item).filter(Item.id == item_id, Item.owner_id == current_user.id).first()\n    return item\n"
+    }
+  ],
+  "property": "An authenticated FastAPI route includes the current user's ownership predicate in the object lookup.",
+  "expected": { "vulnerable": false },
+  "notes": ["Negative control: an owner predicate is explicit in the query."]
+}

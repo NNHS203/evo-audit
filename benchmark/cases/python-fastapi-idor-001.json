@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "caseId": "framework-fastapi-idor-001",
+  "split": "framework-holdout",
+  "language": "python",
+  "files": [
+    {
+      "path": "main.py",
+      "code": "from fastapi import APIRouter, Depends\n\nrouter = APIRouter()\n\n@router.get('/items/{item_id}')\ndef get_item(item_id: int, current_user=Depends(get_current_user), db=Depends(get_db)):\n    item = db.query(Item).filter(Item.id == item_id).first()\n    return item\n"
+    }
+  ],
+  "property": "An authenticated FastAPI route selects an item by a path identifier without an observed subject constraint.",
+  "expected": { "vulnerable": true, "ruleId": "PY-IDOR-001" },
+  "notes": ["Framework holdout: SQLAlchemy-style retrieval must preserve object ownership evidence."]
+}

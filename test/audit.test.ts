@@ -1139,6 +1139,53 @@ test("Python framework policies distinguish deployment settings, auth cookies, a
     "        paste = Paste.query.filter_by(id=id, owner=info.context.user).first()",
     "        return SafeEditPaste(paste=paste)",
   ].join("\n"), "utf8");
+  await writeFile(path.join(root, "flask_idor_unsafe.py"), [
+    "from flask import abort",
+    "@app.get('/notes/<int:note_id>')",
+    "@login_required",
+    "def get_note(note_id):",
+    "    with Session() as session:",
+    "        note = session.get(Note, note_id)",
+    "        return note",
+  ].join("\n"), "utf8");
+  await writeFile(path.join(root, "flask_idor_safe.py"), [
+    "from flask import abort",
+    "@app.get('/notes/<int:note_id>')",
+    "@login_required",
+    "def get_note_safe(note_id):",
+    "    with Session() as session:",
+    "        note = session.get(Note, note_id)",
+    "        if note.user_id != current_user.id:",
+    "            abort(403)",
+    "        return note",
+  ].join("\n"), "utf8");
+  await writeFile(path.join(root, "fastapi_idor_unsafe.py"), [
+    "from fastapi import APIRouter, Depends",
+    "router = APIRouter()",
+    "@router.get('/items/{item_id}')",
+    "def get_item(item_id: int, current_user=Depends(get_current_user), db=Depends(get_db)):",
+    "    item = db.query(Item).filter(Item.id == item_id).first()",
+    "    return item",
+  ].join("\n"), "utf8");
+  await writeFile(path.join(root, "fastapi_idor_safe.py"), [
+    "from fastapi import APIRouter, Depends",
+    "router = APIRouter()",
+    "@router.get('/items/{item_id}')",
+    "def get_item_safe(item_id: int, current_user=Depends(get_current_user), db=Depends(get_db)):",
+    "    item = db.query(Item).filter(Item.id == item_id, Item.owner_id == current_user.id).first()",
+    "    return item",
+  ].join("\n"), "utf8");
+  await writeFile(path.join(root, "flask_idor_body_unsafe.py"), [
+    "from flask import request",
+    "@app.post('/password')",
+    "@token_required",
+    "def update_password(current_user):",
+    "    data = request.get_json()",
+    "    user_id = data.get('user_id')",
+    "    user = User.query.get(user_id)",
+    "    user.set_password(data.get('new_password'))",
+    "    return {'ok': True}",
+  ].join("\n"), "utf8");
   await writeFile(path.join(root, "mass_unsafe.py"), [
     "from flask import request",
     "@app.post('/profile')",
@@ -1274,6 +1321,11 @@ test("Python framework policies distinguish deployment settings, auth cookies, a
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-IDOR-001"), true);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-IDOR-001" && finding.locations.some((location) => location.file === "graphql_idor.py" && location.line === 7)), true);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-IDOR-001" && finding.locations.some((location) => location.file === "graphql_idor.py" && location.line === 14)), false);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-IDOR-001" && finding.locations.some((location) => location.file === "flask_idor_unsafe.py")), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-IDOR-001" && finding.locations.some((location) => location.file === "flask_idor_safe.py")), false);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-IDOR-001" && finding.locations.some((location) => location.file === "fastapi_idor_unsafe.py")), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-IDOR-001" && finding.locations.some((location) => location.file === "fastapi_idor_safe.py")), false);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-IDOR-001" && finding.locations.some((location) => location.file === "flask_idor_body_unsafe.py")), true);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-MASS-ASSIGNMENT-001" && finding.locations.some((location) => location.file === "mass_unsafe.py" && location.line === 6)), true);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-MASS-ASSIGNMENT-001" && finding.locations.some((location) => location.file === "mass_safe.py")), false);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-RATE-LIMIT-001" && finding.locations.some((location) => location.file === "auth.py")), true);
