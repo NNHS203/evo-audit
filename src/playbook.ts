@@ -60,6 +60,36 @@ const defaultRules: PlaybookRule[] = [
     enabled: true,
   },
   {
+    id: "PY-REFLECTED-XSS-001",
+    title: "Request-controlled value reaches an HTML response construction path in Python",
+    description:
+      "An external value appears to be concatenated or formatted into HTML. Output encoding and the actual response context must be independently verified.",
+    severity: "HIGH",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.py"],
+    enabled: true,
+  },
+  {
+    id: "PY-MISSING-AUTH-001",
+    title: "Dangerous Python route lacks an observed authentication boundary",
+    description:
+      "A Flask route containing a high-impact operation has no local authentication or authorization guard. Middleware and deployment policy must be checked before closure.",
+    severity: "HIGH",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.py"],
+    enabled: true,
+  },
+  {
+    id: "PY-CLEARTEXT-PASSWORD-001",
+    title: "Request-controlled password reaches Python storage",
+    description:
+      "A request-controlled password appears to be assigned to a persistence object without an observed one-way hash boundary.",
+    severity: "HIGH",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.py"],
+    enabled: true,
+  },
+  {
     id: "PY-COMMAND-INJECTION-001",
     title: "Request or user input reaches a Python command execution API",
     description:

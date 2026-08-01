@@ -164,6 +164,13 @@ function matches(finding: NormalizedScannerFinding, label: GroundTruthLabel, lin
   return locationMatches(finding, label, lineTolerance);
 }
 
+function matchSpecificity(finding: NormalizedScannerFinding, label: GroundTruthLabel): number {
+  if (!label.ruleIds || label.ruleIds.length === 0) return 0;
+  const findingRuleIds = new Set([finding.ruleId, ...(finding.ruleIds ?? [])]);
+  if (findingRuleIds.has(label.ruleIds[0])) return 2;
+  return label.ruleIds.some((ruleId) => findingRuleIds.has(ruleId)) ? 1 : -1;
+}
+
 function emptyCounts(): ScoreCounts {
   return {
     truePositive: 0,
@@ -197,7 +204,9 @@ function scoreChannel(
   counts.validatedCount = findings.filter((finding) => finding.reportable).length;
 
   for (const finding of findings) {
-    const match = availableLabels.find((candidate) => !matched.has(candidate.index) && matches(finding, candidate.label, lineTolerance));
+    const match = availableLabels
+      .filter((candidate) => !matched.has(candidate.index) && matches(finding, candidate.label, lineTolerance))
+      .sort((left, right) => matchSpecificity(finding, right.label) - matchSpecificity(finding, left.label) || Number(right.label.vulnerable) - Number(left.label.vulnerable) || left.index - right.index)[0];
     if (!match) {
       counts.falsePositive += 1;
       continue;
@@ -267,6 +276,9 @@ function ruleAliases(ruleId: string): string[] {
   if (ruleId.includes("SSTI")) return ["CWE-1336"];
   if (ruleId.includes("XXE")) return ["CWE-611"];
   if (ruleId.includes("UNSAFE-DESERIALIZATION")) return ["CWE-502"];
+  if (ruleId.includes("REFLECTED-XSS")) return ["CWE-79", "CWE-80"];
+  if (ruleId.includes("CLEARTEXT-PASSWORD")) return ["CWE-256", "CWE-257", "CWE-522", "CWE-312"];
+  if (ruleId.includes("MISSING-AUTH")) return ["CWE-306", "CWE-862", "CWE-287", "CWE-284"];
   if (ruleId.includes("PATH-TRAVERSAL")) return ["CWE-22"];
   if (ruleId.includes("HARDCODED-CREDENTIAL")) return ["CWE-798", "CWE-259", "CWE-321"];
   if (ruleId.includes("DEBUG-MODE")) return ["CWE-215", "CWE-489", "CWE-16"];

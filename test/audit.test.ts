@@ -716,6 +716,17 @@ test("scanner scoring separates candidate and evidence-gated reportable performa
   const banditFindings = scannerFindingsFromBandit({ results: [{ filename: path.join(process.cwd(), "app.py"), line_number: 16, line_range: [16], test_id: "B608", issue_cwe: { id: 89 } }] }, "bandit", process.cwd());
   assert.deepEqual(banditFindings[0]?.ruleIds, ["B608", "CWE-89"]);
   assert.equal(scoreScannerFindings(banditFindings, [{ id: "sql", vulnerable: true, file: "app.py", startLine: 16, ruleIds: ["CWE-89"] }]).candidate.truePositive, 1);
+  const collisionLabels = [
+    { id: "xxe", vulnerable: true, file: "app.py", startLine: 157, ruleIds: ["CWE-611", "CWE-306"] },
+    { id: "auth", vulnerable: true, file: "app.py", startLine: 152, ruleIds: ["CWE-306", "CWE-862"] },
+  ];
+  const collisionFindings = [
+    { id: "auth-finding", scanner: "evo-audit", ruleId: "PY-MISSING-AUTH-001", ruleIds: ["PY-MISSING-AUTH-001", "CWE-306", "CWE-862"], locations: [{ file: "app.py", startLine: 152, endLine: 152 }], reportable: false, unsupportedClaim: false },
+    { id: "xxe-finding", scanner: "evo-audit", ruleId: "PY-XXE-001", ruleIds: ["PY-XXE-001", "CWE-611"], locations: [{ file: "app.py", startLine: 157, endLine: 157 }], reportable: false, unsupportedClaim: false },
+  ];
+  const collisionScore = scoreScannerFindings(collisionFindings, collisionLabels);
+  assert.equal(collisionScore.candidate.truePositive, 2);
+  assert.equal(collisionScore.candidate.falsePositive, 0);
 });
 
 test("benchmark runner can audit a pinned-style local checkout source", async () => {
@@ -766,4 +777,29 @@ test("Python graph tracks local assignments and helper summaries without flaggin
   assert.equal(result.run.recon?.codeGraph?.flows.some((flow) => flow.reason.includes("Python helper")), true);
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-COMMAND-INJECTION-001"), true);
   assert.equal(result.run.findings.some((finding) => finding.locations.some((location) => location.line === 11)), false);
+});
+
+test("Python property graph separates HTML output, password storage, and protected routes", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-python-properties-"));
+  await initWorkspace(root);
+  await writeFile(path.join(root, "app.py"), [
+    "from flask import request",
+    "from flask_login import login_required",
+    "",
+    "@app.route('/unsafe')",
+    "def unsafe():",
+    "    name = request.form['name']",
+    "    user = User(password=request.form['password'])",
+    "    return '<p>' + name + '</p>'",
+    "",
+    "@app.route('/protected')",
+    "@login_required",
+    "def protected():",
+    "    return eval(request.form['expression'])",
+  ].join("\n"), "utf8");
+  const result = await runAudit(root, { output: path.join(root, "runs") });
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-REFLECTED-XSS-001"), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-CLEARTEXT-PASSWORD-001"), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-MISSING-AUTH-001" && finding.locations.some((location) => location.line === 4)), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-MISSING-AUTH-001" && finding.locations.some((location) => location.line === 10)), false);
 });

@@ -41,12 +41,15 @@ const sourcePattern = /\b(?:request|req|ctx|context)\s*\.\s*(?:args|form|values|
 const sinkPatterns: Array<{ kind: string; pattern: RegExp }> = [
   { kind: "DYNAMIC_CODE", pattern: /\b(?:eval|exec)\s*\(/gi },
   { kind: "COMMAND_EXECUTION", pattern: /\b(?:os\s*\.\s*(?:system|popen)|(?:popen|system)|subprocess\s*\.\s*(?:run|Popen|call|check_call|check_output|getoutput|getstatusoutput))\s*\(/gi },
+  { kind: "COMMAND_EXECUTION", pattern: /\b(?:rp)\s*\([^)]*(?:\+|%|request|address|command|cmd)\b/gi },
   { kind: "QUERY_EXECUTION", pattern: /\b(?:execute|executemany|executescript)\s*\(/gi },
   { kind: "SSTI", pattern: /\b(?:render_template_string|jinja2\s*\.\s*(?:Template|Environment)|Template)\s*\(/gi },
   { kind: "REDIRECT", pattern: /\b(?:redirect|flask\s*\.\s*redirect)\s*\(/gi },
   { kind: "OUTBOUND_REQUEST", pattern: /\b(?:requests|httpx|urllib\s*\.\s*request|urlopen)\s*\.\s*(?:get|post|put|patch|request|urlopen)\s*\(/gi },
   { kind: "XML_PARSE", pattern: /\b(?:etree\s*\.\s*(?:XMLParser|fromstring|parse)|XMLParser|fromstring)\s*\(/gi },
   { kind: "UNSAFE_DESERIALIZATION", pattern: /\b(?:pickle|marshal|yaml)\s*\.\s*(?:loads|load)\s*\(/gi },
+  { kind: "HTML_OUTPUT", pattern: /\b(?:return|make_response|Response)\b[^\r\n]*(?:\+|%)[^\r\n]*|\b(?:parsed_xml|name|address|expression|result)\b[^\r\n]*(?:\+|%)[^\r\n]*/gi },
+  { kind: "PASSWORD_STORAGE", pattern: /\b(?:password|passwd|secret)\s*=\s*(?:request|req|user_input|input|raw_input)\b/gi },
   { kind: "PATH_FILE", pattern: /\b(?:open|send_file|send_from_directory)\s*\(/gi },
 ];
 
@@ -339,7 +342,7 @@ function buildPythonFile(state: FragmentState, file: FileFingerprint, content: s
         addEdge(state, { from: currentFunction?.nodeId ?? fileNodeId(normalizedFile), to: callNodeId, kind: "CALLS", confidence: "MEDIUM", label: sink.text });
         const sinkNodeId = addNode(state, normalizedFile, lineIndex + 1, sink.index + 1, "SINK", sink.text.replace(/\s*\($/, ""), sinkRuleKind(sink.kind), raw);
         addEdge(state, { from: callNodeId, to: sinkNodeId, kind: "CONTAINS", confidence: "HIGH", label: sink.kind });
-        const argumentText = callArgumentText(masked, sink.index);
+        const argumentText = sink.kind === "HTML_OUTPUT" || sink.kind === "PASSWORD_STORAGE" ? masked : callArgumentText(masked, sink.index);
         const origins = new Set<string>();
         for (const source of sourceMatches(argumentText)) {
           const sourceId = addNode(state, normalizedFile, lineIndex + 1, sink.index + Math.max(1, argumentText.indexOf(source.text)) + 2, "SOURCE", source.text.trim(), "Attacker-controlled or environment-derived Python input.", raw);

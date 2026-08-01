@@ -572,7 +572,7 @@ function locationFor(node: CodeGraphNode): SourceLocation {
 }
 
 function ruleForSink(playbook: AuditPlaybook, kind: string, file: string): PlaybookRule | undefined {
-  const suffix = kind === "DYNAMIC_CODE" ? "DYNAMIC-CODE" : kind === "COMMAND_EXECUTION" ? "COMMAND-INJECTION" : kind === "QUERY_EXECUTION" ? "SQL-INJECTION" : kind === "REDIRECT" ? "OPEN-REDIRECT" : kind === "SSTI" ? "SSTI" : kind === "OUTBOUND_REQUEST" ? "SSRF" : kind === "XML_PARSE" ? "XXE" : kind === "UNSAFE_DESERIALIZATION" ? "UNSAFE-DESERIALIZATION" : kind === "PATH_FILE" ? "PATH-TRAVERSAL" : undefined;
+  const suffix = kind === "DYNAMIC_CODE" ? "DYNAMIC-CODE" : kind === "COMMAND_EXECUTION" ? "COMMAND-INJECTION" : kind === "QUERY_EXECUTION" ? "SQL-INJECTION" : kind === "REDIRECT" ? "OPEN-REDIRECT" : kind === "SSTI" ? "SSTI" : kind === "OUTBOUND_REQUEST" ? "SSRF" : kind === "XML_PARSE" ? "XXE" : kind === "UNSAFE_DESERIALIZATION" ? "UNSAFE-DESERIALIZATION" : kind === "HTML_OUTPUT" ? "REFLECTED-XSS" : kind === "PASSWORD_STORAGE" ? "CLEARTEXT-PASSWORD" : kind === "PATH_FILE" ? "PATH-TRAVERSAL" : undefined;
   if (!suffix) return undefined;
   const extension = file.slice(file.lastIndexOf(".")).toLowerCase();
   return playbook.rules.find((rule) => rule.enabled && rule.id.includes(suffix) && rule.globs.some((glob) => glob.endsWith(extension)))
@@ -614,6 +614,16 @@ function findingText(kind: string): Pick<Finding, "rootCause" | "impact" | "reme
     rootCause: "An AST-traced boundary input reaches a Python object deserialization sink.",
     impact: "An attacker may instantiate unexpected objects or execute code when a pickle/YAML loader accepts untrusted bytes.",
     remediation: "Use a safe data-only format and loader, enforce a schema, and verify malicious object tags are rejected.",
+  };
+  if (kind === "HTML_OUTPUT") return {
+    rootCause: "An AST-traced boundary input reaches an HTML response construction path.",
+    impact: "An attacker may inject markup or script if the value is rendered without context-appropriate escaping.",
+    remediation: "Keep untrusted values as template data and apply context-aware output encoding; verify markup remains inert in a browser-level regression test.",
+  };
+  if (kind === "PASSWORD_STORAGE") return {
+    rootCause: "An AST-traced boundary input reaches a password or secret storage assignment.",
+    impact: "A database or log disclosure can expose reusable credentials when the value is stored without a one-way password hash.",
+    remediation: "Hash passwords with a reviewed password-hashing function and verify that raw credentials never reach persistence or logs.",
   };
   if (kind === "PATH_FILE") return {
     rootCause: "An AST-traced boundary input reaches a file path or file-serving sink.",

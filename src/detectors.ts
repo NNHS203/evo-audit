@@ -253,6 +253,42 @@ function findMatch(rule: PlaybookRule, line: string, rawLine = line): Omit<Detec
   return null;
 }
 
+function pythonMissingAuthLines(content: string, playbook: AuditPlaybook): Map<number, string[]> {
+  const result = new Map<number, string[]>();
+  const rule = playbook.rules.find((candidate) => candidate.id === "PY-MISSING-AUTH-001" && candidate.enabled);
+  if (!rule) return result;
+  const codeLines = maskPython(content).split(/\r?\n/);
+  let pendingRouteLine: number | null = null;
+  for (let index = 0; index < codeLines.length; index += 1) {
+    const code = codeLines[index] ?? "";
+    if (/^\s*@[^\n]*\broute\s*\(/.test(code)) {
+      pendingRouteLine = index + 1;
+      continue;
+    }
+    const definition = code.match(/^(\s*)def\s+[A-Za-z_]\w*\s*\([^)]*\)\s*:/);
+    if (!definition || pendingRouteLine === null) continue;
+    const functionIndent = definition[1].replace(/\t/g, "    ").length;
+    let end = codeLines.length;
+    for (let cursor = index + 1; cursor < codeLines.length; cursor += 1) {
+      const candidate = codeLines[cursor] ?? "";
+      const candidateIndent = (candidate.match(/^\s*/)?.[0] ?? "").replace(/\t/g, "    ").length;
+      if (candidate.trim() && candidateIndent <= functionIndent) {
+        end = cursor;
+        break;
+      }
+    }
+    const body = codeLines.slice(index, end).join("\n");
+    const routeBlock = `${codeLines.slice(pendingRouteLine - 1, index).join("\n")}\n${body}`;
+    const dangerous = /\b(?:eval|exec|(?:os\s*\.\s*)?(?:popen|system)|subprocess\s*\.|XMLParser|fromstring|render_template_string)\b|\brp\s*\(/.test(routeBlock)
+      || /\b(?:return|make_response|Response)\b[^\n]*(?:\+|%)/.test(routeBlock);
+    const protectedRoute = /\b(?:login_required|requires_auth|authorize|authorise|permission|current_user|is_authenticated)\b/.test(routeBlock)
+      || /\bsession\s*(?:\.|\[)/.test(routeBlock);
+    if (dangerous && !protectedRoute) result.set(pendingRouteLine, [rule.id]);
+    pendingRouteLine = null;
+  }
+  return result;
+}
+
 export function detectFindings(
   relativePath: string,
   content: string,
@@ -263,12 +299,20 @@ export function detectFindings(
   const obligations: AuditObligation[] = [];
   const lines = content.split(/\r?\n/);
   const codeLines = relativePath.toLowerCase().endsWith(".py") ? maskPython(content).split(/\r?\n/) : maskNonCode(content).split(/\r?\n/);
+  const pythonPolicyMatches = relativePath.toLowerCase().endsWith(".py") ? pythonMissingAuthLines(content, playbook) : new Map<number, string[]>();
 
   for (const [index, line] of lines.entries()) {
     const codeLine = codeLines[index] ?? "";
     for (const rule of playbook.rules) {
       if (!matchesRule(rule, relativePath)) continue;
-      const match = findMatch(rule, codeLine, line);
+      const policyMatch = pythonPolicyMatches.get(index + 1)?.includes(rule.id) ?? false;
+      const match = findMatch(rule, codeLine, line) ?? (policyMatch ? {
+        rootCause: "A dangerous Flask route is reachable without an observed authentication or authorization guard.",
+        impact: "An unauthenticated caller may reach a high-impact operation that should be restricted to an authenticated principal.",
+        remediation: "Require authentication and authorization at the route or trusted middleware boundary, then add a test for anonymous and authorized requests.",
+        kind: "AUTHORIZATION_BOUNDARY" as const,
+        limitation: "This static policy pass infers route protection from local decorators and session checks; middleware and deployment policy still require independent validation.",
+      } : null);
       if (!match) continue;
 
       const column = Math.max(0, line.search(/\S/));
