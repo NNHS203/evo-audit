@@ -590,19 +590,17 @@ function pythonRateLimitLines(relativePath: string, content: string, playbook: A
   const blocks = pythonPolicyBlocks(content);
   const moduleHasLimiter = /\b(?:flask_limiter|slowapi|Limiter|rate_limit|throttle|lockout|backoff)\b/i.test(content);
   for (const block of blocks) {
-    const authName = /(?:^|[_-])(?:do_)?(?:login|signin|sign_in|register|signup|sign_up|reset_password|forgot_password|change_password|verify_email|verify_token|password_reset|request_password_reset|confirm_password_reset|user_login|login_view|password_reset_request|password_reset_confirm|request_reset|confirm_reset|create_user|admin_create_user)(?:[_-]|$)/i.test(block.name);
-    const identityName = /(?:^|[_-])(?:identity|verification|verify|otp|mfa)(?:[_-]|$)/i.test(block.name);
-    const authRouteName = /(?:^|\/)\s*(?:login|signin|sign-in|register|signup|sign-up|auth|token|password|reset|verify|verification|mfa|otp)\b/i.test(block.decorators);
-    const requestInput = /\b(?:request|req)\s*\.\s*(?:POST|form|json|body|values|data|args|query_params)\b|\bself\s*\.\s*request\s*\.\s*(?:arguments|body|files|query|uri)\b|\bself\s*\.\s*get_argument\s*\(|\b(?:body|payload|data|credentials?|form|login_data|register_data|reset_data|input)\s*(?:\.|\[)/i.test(block.body);
+    const authName = /(?:^|[_-])(?:do_)?(?:login|signin|sign_in|register|signup|sign_up|reset_password|forgot_password|verify_email|verify_token|password_reset|request_password_reset|confirm_password_reset|user_login|login_view|password_reset_request|password_reset_confirm|request_reset|confirm_reset|admin_create_user)(?:[_-]|$)/i.test(block.name);
+    const identityName = /(?:^|[_-])(?:identity|verification|otp)(?:[_-]|$)/i.test(block.name);
+    const authRouteName = /(?:^|\/)\s*(?:login|signin|sign-in|register|signup|sign-up|token|reset|verify|mfa|otp)\b/i.test(block.decorators);
+    const requestInput = /\b(?:request|req)\s*\.\s*(?:POST|form|json|body|values|data|args|query_params)\b|\bself\s*\.\s*request\s*\.\s*(?:arguments|body|files|query|uri)\b|\bself\s*\.\s*get_argument\s*\(|\b(?:body|payload|data|credentials?|login_data|register_data|reset_data|input)\s*(?:\.|\[)/i.test(block.body);
     const credentialInput = /\b(?:password|passwd|passphrase|pwd|username|uname|email|handle|phone|otp|mfa|credential|api[_-]?key|verification[_-]?code|reset[_-]?token)\b/i.test(block.body);
     const postLike = /\b(?:request|req)\s*\.\s*(?:POST|form|json|body|values|data)\b|\bself\s*\.\s*(?:request\s*\.\s*)?get_argument\s*\(|\b(?:methods|method)\s*=\s*[^\n]*(?:POST|post)/i.test(block.body)
       || /\b(?:methods|method)\s*=\s*[^\n]*(?:POST|post)/i.test(block.decorators)
       || /\b(?:router|api_router|app|blueprint|bp)\s*\.\s*(?:post|put|patch)\s*\(/i.test(block.decorators)
       || /\b(?:require_POST)\b|\b(?:require_http_methods|api_view)\s*\([^)]*\bPOST\b/i.test(block.decorators);
-    const authOperation = /\b(?:authenticate|check_password|check_password_hash|verify_password|login_user|authenticate_user)\s*\(/i.test(block.body);
     const explicitAuthSurface = authName || authRouteName || identityName;
-    const authContext = explicitAuthSurface || (authOperation && credentialInput);
-    const authFlow = authContext && requestInput && (postLike || authName || authRouteName || identityName);
+    const authFlow = explicitAuthSurface && requestInput && (postLike || authName || authRouteName || identityName);
     const graphqlMutationAuthFlow = /\bgraphene\s*\.\s*Mutation\b/i.test(content)
       && /^mutate$/i.test(block.name)
       && credentialInput
