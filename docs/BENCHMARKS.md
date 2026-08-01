@@ -114,11 +114,11 @@ It uses the same 62 completed repositories, four explicit blocked entries, and
 the same one-to-one scorer, but the `298a812` scanner revision adds Python
 property/taint semantics, framework-aware policy evidence, template unsafe
 output checks, session-integrity separation, generated-asset filtering,
-parameterized-query recognition, and gap analysis. It produced 699 candidates:
-precision `0.794`, recall `0.315`, FPR `0.367`, and F3 `0.335`.
+parameterized-query recognition, and gap analysis. It produced 697 candidates:
+precision `0.796`, recall `0.315`, FPR `0.364`, and F3 `0.335`.
 The run used no model or runtime validator, so reportable recall remains `0` by
 policy. This is a precision-focused revision relative to the previous
-candidate-only run: it removes 107 candidates and 102 unmatched candidates
+candidate-only run: it removes 109 candidates and 104 unmatched candidates
 while retaining nearly the same recall. These are observed improvements over
 the checked-in baseline, not a claim of superiority over OpenAI, Cloudflare,
 or research baselines.
