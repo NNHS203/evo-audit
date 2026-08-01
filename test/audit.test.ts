@@ -897,6 +897,57 @@ test("Python graph tracks local assignments and helper summaries without flaggin
   assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-OPEN-REDIRECT-001" && finding.locations.some((location) => location.file === "safe.py")), false);
 });
 
+test("Python graph keeps bound SQL parameters and browser clients out of server-side injection findings", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-safe-boundary-"));
+  await initWorkspace(root);
+  await writeFile(path.join(root, "app.py"), [
+    "from flask import request",
+    "@app.post('/profile')",
+    "def update_profile():",
+    "    data = request.json",
+    "    allowed_updates = ['email', 'country']",
+    "    updates = {key: value for key, value in data.items() if key in allowed_updates}",
+    "    update_query = 'UPDATE users SET ' + ', '.join([f'{key} = ?' for key in updates.keys()]) + ' WHERE id = ?'",
+    "    cursor.execute(update_query, list(updates.values()) + [1])",
+  ].join("\n"), "utf8");
+  await writeFile(path.join(root, "client.ts"), [
+    "export async function load(url: string) {",
+    "  return fetch(url);",
+    "}",
+  ].join("\n"), "utf8");
+  await writeFile(path.join(root, "multiline.py"), [
+    "from flask import request",
+    "@app.post('/email')",
+    "def update_email():",
+    "    email = request.form['email']",
+    "    query = \"\"\"UPDATE users SET email = ? WHERE id = ?\"\"\"",
+    "    cursor.execute(query, (email, 1))",
+  ].join("\n"), "utf8");
+  const result = await runAudit(root, { output: path.join(root, "runs") });
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-SQL-INJECTION-001"), false);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId.includes("SSRF") && finding.locations.some((location) => location.file === "client.ts")), false);
+});
+
+test("Python sensitive-record exposure requires a raw sensitive response", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-sensitive-projection-"));
+  await initWorkspace(root);
+  await writeFile(path.join(root, "safe.py"), [
+    "def list_students(conn):",
+    "    query = 'SELECT id, name FROM students'",
+    "    rows = conn.execute(query).fetchall()",
+    "    return [row['name'] for row in rows]",
+  ].join("\n"), "utf8");
+  await writeFile(path.join(root, "unsafe.py"), [
+    "@app.get('/users')",
+    "def list_users(conn):",
+    "    rows = conn.execute('SELECT id, email, password FROM users').fetchall()",
+    "    return rows",
+  ].join("\n"), "utf8");
+  const result = await runAudit(root, { output: path.join(root, "runs") });
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-SENSITIVE-DATA-EXPOSURE-001" && finding.locations.some((location) => location.file === "safe.py")), false);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-SENSITIVE-DATA-EXPOSURE-001" && finding.locations.some((location) => location.file === "unsafe.py")), true);
+});
+
 test("Python property graph separates HTML output, password storage, and protected routes", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-python-properties-"));
   await initWorkspace(root);

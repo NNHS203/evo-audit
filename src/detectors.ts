@@ -116,7 +116,7 @@ function matchesRule(rule: PlaybookRule, relativePath: string): boolean {
 function isGeneratedAssetPath(relativePath: string): boolean {
   const normalized = relativePath.replace(/\\/g, "/").toLowerCase();
   const basename = normalized.slice(normalized.lastIndexOf("/") + 1);
-  return /(?:^|\/)(?:node_modules|vendor|third_party|static\/js|public\/vendor)\//.test(normalized)
+  return /(?:^|\/)(?:node_modules|vendor|third_party|static|public)\//.test(normalized)
     && /(?:redoc|swagger|jquery|bootstrap|vendor|bundle|\.min\.)/.test(basename);
 }
 
@@ -195,16 +195,6 @@ function findMatch(rule: PlaybookRule, line: string, rawLine = line, relativePat
       remediation: "Use one stable public authentication error and keep diagnostic detail out of the response.",
       kind: "SOURCE_TO_SINK",
       limitation: "This pass uses a local branch annotation and does not compare the full response timing or body at runtime.",
-    };
-  }
-
-  if (rule.id === "PY-RATE-LIMIT-001" && /\b(?:add_api|register_blueprint)\s*\(/.test(line)) {
-    return {
-      rootCause: "A Python API surface is registered without an observed rate-limiting boundary in the local registration call.",
-      impact: "Authentication and resource-intensive endpoints may accept unlimited requests, enabling brute force or denial of service.",
-      remediation: "Add endpoint-appropriate rate limits, account lockout/backoff, and a test that verifies limits are enforced.",
-      kind: "CUSTOM",
-      limitation: "The static pass cannot see gateway, reverse-proxy, or deployment-level throttling outside this source snapshot.",
     };
   }
 
@@ -508,6 +498,7 @@ function pythonFrameworkPolicyLines(relativePath: string, content: string, playb
 interface PythonPolicyBlock {
   name: string;
   startLine: number;
+  endLine: number;
   routeLine: number;
   decorators: string;
   body: string;
@@ -570,6 +561,7 @@ function pythonPolicyBlocks(content: string): PythonPolicyBlock[] {
     blocks.push({
       name: definition.name,
       startLine: index + 1,
+      endLine: end,
       routeLine,
       decorators: decorators.join("\n"),
       body: codeLines.slice(index, end).join("\n"),
@@ -588,17 +580,20 @@ function pythonRateLimitLines(relativePath: string, content: string, playbook: A
   const moduleHasLimiter = /\b(?:flask_limiter|slowapi|Limiter|rate_limit|throttle|lockout|backoff)\b/i.test(content);
   for (const block of blocks) {
     const routeOrName = `${block.decorators}\n${block.name}`;
-    const hasRouteDecorator = /@[^\n]*\b(?:route|get|post|put|patch|delete|options|head|api_route)\s*\(/i.test(block.decorators);
     const authName = /\b(?:do_login|do_signup|login|signin|sign_in|register|signup|sign_up|reset_password|forgot_password|change_password|verify_email|verify_token|password_reset|request_password_reset|confirm_password_reset)\b/i.test(block.name);
     const authRouteName = /(?:^|\/)\s*(?:login|signin|sign-in|register|signup|sign-up|auth|token|password|reset|verify|mfa|otp)\b/i.test(routeOrName);
     const requestInput = /\b(?:request|req)\s*\.\s*(?:POST|form|json|body|values|data|args|query_params)\b|\bself\s*\.\s*request\s*\.\s*(?:arguments|body|files|query|uri)\b|\bself\s*\.\s*get_argument\s*\(/i.test(block.body);
-    const credentialOperation = authName || /\b(?:password|passwd|username|email|credential|authenticate|check_password|check_password_hash|verify_password|set_password|send_mail|token)\b/i.test(block.body);
+    const credentialInput = /\b(?:password|passwd|passphrase|username|email|otp|mfa|credential|api[_-]?key)\b/i.test(block.body);
     const postLike = /\b(?:request|req)\s*\.\s*(?:POST|form|json|body|values|data)\b|\bself\s*\.\s*(?:request\s*\.\s*)?get_argument\s*\(|\b(?:methods|method)\s*=\s*[^\n]*(?:POST|post)/i.test(block.body)
       || /\b(?:methods|method)\s*=\s*[^\n]*(?:POST|post)/i.test(block.decorators);
     const authOperation = /\b(?:authenticate|check_password|check_password_hash|verify_password|login_user|authenticate_user)\s*\(/i.test(block.body);
-    const authContext = authName || authRouteName || authOperation;
-    const authFlow = authContext && requestInput && credentialOperation && (postLike || authName || authRouteName);
-    const routeAuthFlow = (hasRouteDecorator || authRouteName || authName) && credentialOperation && (postLike || (requestInput && authName));
+    const explicitAuthSurface = authName || authRouteName;
+    const authContext = explicitAuthSurface || (authOperation && credentialInput);
+    const authFlow = authContext && requestInput && (postLike || authName || authRouteName);
+    // A decorated endpoint that merely reads an email/token/profile field is
+    // not itself an authentication-attempt surface. Require an explicit auth
+    // route/name or an authentication operation before suggesting throttling.
+    const routeAuthFlow = explicitAuthSurface && credentialInput && (postLike || (requestInput && authName));
     if (!authFlow && !routeAuthFlow) continue;
     if (moduleHasLimiter && /\b(?:limiter|rate_limit|throttle|lockout|backoff|failed_attempt|sleep\s*\()\b/i.test(block.body)) continue;
     if (/\b(?:limiter|rate_limit|throttle|lockout|backoff|failed_attempt|sleep\s*\()\b/i.test(block.body)) continue;
@@ -755,9 +750,19 @@ function pythonSensitiveLogLines(relativePath: string, content: string, playbook
   const result = new Map<number, string[]>();
   const rule = playbook.rules.find((candidate) => candidate.id === "PY-SENSITIVE-DATA-EXPOSURE-001" && candidate.enabled);
   if (!rule || isNonProductionFixturePath(relativePath)) return result;
+  const blocks = pythonPolicyBlocks(content);
   for (const [index, raw] of content.split(/\r?\n/).entries()) {
-    if (/(?:\blogger?|logging|log)\s*\.\s*(?:debug|info|warning|error|exception|critical)\s*\(|\bprint\s*\(/i.test(raw)
-      && /\b(?:password|passwd|passphrase|secret|api[_-]?key|access[_-]?token|auth[_-]?token|authorization|cookie|session|ssn|social[_-]?security|credit[_-]?card)\b/i.test(raw)) result.set(index + 1, [rule.id]);
+    const sensitive = /\b(?:password|passwd|passphrase|secret|api[_-]?key|access[_-]?token|auth[_-]?token|authorization|cookie|session|ssn|social[_-]?security|credit[_-]?card)\b/i.test(raw);
+    if (!sensitive) continue;
+    const loggerCall = /(?:\blogger?|logging|log)\s*\.\s*(?:debug|info|warning|error|exception|critical)\s*\(/i.test(raw);
+    const printCall = /\bprint\s*\(/i.test(raw);
+    if (!loggerCall && !printCall) continue;
+    // A generic CLI/debug print is not a client-facing disclosure. Keep
+    // direct logger calls visible, and only promote print() when it is inside
+    // an explicitly decorated web handler with a reachable request path.
+    if (printCall && !blocks.some((block) => index + 1 >= block.startLine && index + 1 <= block.endLine
+      && /@[^\n]*\b(?:route|get|post|put|patch|delete|options|head|api_route)\s*\(/i.test(block.decorators))) continue;
+    result.set(index + 1, [rule.id]);
   }
   return result;
 }
@@ -833,9 +838,18 @@ function pythonSensitiveExposureLines(content: string, playbook: AuditPlaybook):
       }
     }
     const body = lines.slice(index, end).join("\n");
+    const rawBody = content.split(/\r?\n/).slice(index, end).join("\n");
     if (!/\b(?:fetchall|fetchmany)\s*\(/i.test(body)) continue;
+    const returnsRawRows = /\breturn\s+(?:(?:jsonify|JsonResponse|Response)\s*\(\s*)?(?:_data|rows|records|results|users)\b/i.test(body);
+    if (!returnsRawRows) continue;
+    // A DAO that projects id/name records is not automatically a disclosure.
+    // Promote only a raw row return containing sensitive fields, SELECT *, or
+    // a route-level response whose schema cannot be seen locally.
+    const sensitiveQuery = /\b(?:select\s+\*|password|passwd|passphrase|secret|token|api[_-]?key|access[_-]?token|auth[_-]?token|authorization|email|phone|address|ssn|social[_-]?security|credit[_-]?card|role|permission|mfa|salt|hash)\b/i.test(rawBody);
+    const routeResponse = /@[^\n]*\b(?:route|get|post|put|patch|delete|options|head|api_route)\s*\(/i.test(rawBody);
+    if (!sensitiveQuery && !routeResponse) continue;
     for (let cursor = index + 1; cursor < end; cursor += 1) {
-      if (/\breturn\b[^\n]*(?:_data|rows|records|results|users)\b/i.test(lines[cursor] ?? "") && !/_data\s*\[/.test(lines[cursor] ?? "")) {
+      if (/\breturn\s+(?:(?:jsonify|JsonResponse|Response)\s*\(\s*)?(?:_data|rows|records|results|users)\b/i.test(lines[cursor] ?? "")) {
         result.set(cursor + 1, [rule.id]);
         break;
       }

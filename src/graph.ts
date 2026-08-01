@@ -139,7 +139,7 @@ function isPythonFile(file: string): boolean {
 function isLikelyGeneratedAsset(file: string): boolean {
   const normalized = normalizePath(file).toLowerCase();
   const basename = normalized.slice(normalized.lastIndexOf("/") + 1);
-  return /(?:^|\/)(?:node_modules|vendor|third_party|static\/js|public\/vendor)\//.test(normalized)
+  return /(?:^|\/)(?:node_modules|vendor|third_party|static|public)\//.test(normalized)
     && /(?:redoc|swagger|jquery|bootstrap|vendor|bundle|\.min\.)/.test(basename);
 }
 
@@ -582,8 +582,11 @@ function ruleForSink(playbook: AuditPlaybook, kind: string, file: string): Playb
   const suffix = kind === "DYNAMIC_CODE" ? "DYNAMIC-CODE" : kind === "COMMAND_EXECUTION" ? "COMMAND-INJECTION" : kind === "QUERY_EXECUTION" ? "SQL-INJECTION" : kind === "NOSQL_QUERY" ? "NOSQL-INJECTION" : kind === "REDIRECT" ? "OPEN-REDIRECT" : kind === "SSTI" ? "SSTI" : kind === "OUTBOUND_REQUEST" ? "SSRF" : kind === "XML_PARSE" ? "XXE" : kind === "UNSAFE_DESERIALIZATION" ? "UNSAFE-DESERIALIZATION" : kind === "HTML_OUTPUT" ? "REFLECTED-XSS" : kind === "PASSWORD_STORAGE" ? "CLEARTEXT-PASSWORD" : kind === "PATH_FILE" ? "PATH-TRAVERSAL" : undefined;
   if (!suffix) return undefined;
   const extension = file.slice(file.lastIndexOf(".")).toLowerCase();
-  return playbook.rules.find((rule) => rule.enabled && rule.id.includes(suffix) && rule.globs.some((glob) => glob.endsWith(extension)))
-    ?? playbook.rules.find((rule) => rule.enabled && rule.id.includes(suffix));
+  // Never fall back to a rule from another language. A JavaScript client
+  // calling fetch/axios is not a Python server-side request, and selecting
+  // PY-SSRF-001 here turns ordinary browser/API-client code into a false
+  // positive. The extension-specific rule is the only safe mapping.
+  return playbook.rules.find((rule) => rule.enabled && rule.id.includes(suffix) && rule.globs.some((glob) => glob.endsWith(extension)));
 }
 
 function findingText(kind: string): Pick<Finding, "rootCause" | "impact" | "remediation"> {
