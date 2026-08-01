@@ -52,7 +52,7 @@ version and execution policy.
 One pinned observed snapshot is checked in at
 [`benchmark/results/realvuln-damn-vulnerable-flask-v2-20260801.json`](../benchmark/results/realvuln-damn-vulnerable-flask-v2-20260801.json).
 It is deliberately marked `OBSERVED_BASELINE`, not a CI gate: on the same
-15-vulnerability/4-trap Flask checkout, Evo Audit commit `e1182bb` measured
+15-vulnerability/4-trap Flask checkout, Evo Audit commit `03f2b0b` measured
 candidate precision 1.000, recall 1.000, FPR 0, F3 1.000 after adding
 property-flow coverage and primary-CWE-aware matching; Bandit 1.9.4 measured precision
 0.200, recall 0.067, FPR 0.500, F3 0.071. Neither result counts as reportable
@@ -62,7 +62,7 @@ independent validators are required before generalizing it.
 
 A separate pinned holdout, VAmPI (`realvuln-vampi`), is recorded at
 [`benchmark/results/realvuln-vampi-v2-20260801.json`](../benchmark/results/realvuln-vampi-v2-20260801.json).
-Commit `b602028` measured 15/15 vulnerable labels, 0/4 false-positive traps,
+Commit `03f2b0b` measured 15/15 vulnerable labels, 0/4 false-positive traps,
 precision 1.000, recall 1.000, and F3 1.000. This is still an observed
 two-repository Python result, not a general claim about all repositories or
 models. One other manifest URL returned repository-not-found and was excluded

@@ -23,7 +23,7 @@
   },
   "scanners": {
     "evo-audit": {
-      "commit": "b602028",
+      "commit": "03f2b0b",
       "findings": 15,
       "candidate": {
         "truePositive": 15,
