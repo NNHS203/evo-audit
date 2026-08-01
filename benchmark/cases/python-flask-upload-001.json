@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "caseId": "framework-flask-upload-001",
+  "split": "framework-holdout",
+  "language": "python",
+  "files": [
+    {
+      "path": "uploads.py",
+      "code": "from flask import request\n\n@app.post('/upload')\ndef upload():\n    uploaded_file = request.files['file']\n    uploaded_file.save('/srv/uploads/' + uploaded_file.filename)\n    return {'ok': True}\n"
+    }
+  ],
+  "property": "A Flask upload reaches storage without an observed content or extension policy.",
+  "expected": { "vulnerable": true, "ruleId": "PY-UNRESTRICTED-FILE-UPLOAD-001" },
+  "notes": ["Framework holdout: filename and storage policy are separate evidence obligations."]
+}

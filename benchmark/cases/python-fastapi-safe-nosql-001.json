@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "caseId": "framework-fastapi-safe-nosql-001",
+  "split": "framework-holdout",
+  "language": "python",
+  "files": [
+    {
+      "path": "main.py",
+      "code": "from fastapi import FastAPI\n\napp = FastAPI()\n\ndef find_users(query):\n    return users.find(query)\n\n@app.get('/search')\nasync def search(username: str):\n    return find_users({'username': username})\n"
+    }
+  ],
+  "property": "A scalar FastAPI parameter is placed into a fixed-key NoSQL lookup rather than an operator-bearing object.",
+  "expected": { "vulnerable": false },
+  "notes": ["Negative control for structured-vs-scalar NoSQL taint."]
+}

@@ -45,6 +45,10 @@ evo-audit benchmark ./benchmark/cases --split development \
   --manifest ./benchmark/benchmark-manifest.json \
   --min-recall 1 --min-precision 1 --max-fpr 0
 
+# Framework holdout: FastAPI, Django, Flask, plus a safe NoSQL control.
+evo-audit benchmark ./benchmark/cases --split framework-holdout \
+  --manifest ./benchmark/benchmark-manifest.json
+
 # Optional: run the same cases through a configured API/OAuth model worker.
 evo-audit benchmark ./benchmark/cases --split development \
   --model auto --config ./audit.models.json --max-model-tasks 8

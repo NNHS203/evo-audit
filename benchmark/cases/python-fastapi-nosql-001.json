@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "caseId": "framework-fastapi-nosql-001",
+  "split": "framework-holdout",
+  "language": "python",
+  "files": [
+    {
+      "path": "main.py",
+      "code": "from fastapi import FastAPI, Request\n\napp = FastAPI()\n\ndef find_users(query):\n    return users.find(query)\n\n@app.post('/search')\nasync def search(request: Request):\n    query = await request.json()\n    return find_users(query)\n"
+    }
+  ],
+  "property": "A FastAPI JSON object reaches a Mongo-like query sink without a field allowlist.",
+  "expected": { "vulnerable": true, "ruleId": "PY-NOSQL-INJECTION-001" },
+  "notes": ["Structured request objects are intentionally distinct from scalar fixed-key lookups."]
+}

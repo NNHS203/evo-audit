@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "caseId": "framework-django-idor-001",
+  "split": "framework-holdout",
+  "language": "python",
+  "files": [
+    {
+      "path": "app/views/work_info/views.py",
+      "code": "from django.http import JsonResponse\n\ndef work_info(request, user_id):\n    return JsonResponse(User.objects.get(id=user_id).to_dict())\n"
+    }
+  ],
+  "property": "A Django-style object lookup uses a caller-controlled identifier without an owner constraint.",
+  "expected": { "vulnerable": true, "ruleId": "PY-IDOR-001" },
+  "notes": ["Framework holdout: object ownership must be verified independently."]
+}

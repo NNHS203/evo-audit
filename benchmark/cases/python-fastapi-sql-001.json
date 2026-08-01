@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "caseId": "framework-fastapi-sql-001",
+  "split": "framework-holdout",
+  "language": "python",
+  "files": [
+    {
+      "path": "main.py",
+      "code": "from fastapi import FastAPI\n\napp = FastAPI()\n\ndef run_query(query):\n    return db.execute(query)\n\n@app.get('/users')\nasync def users(username: str):\n    return run_query(f'SELECT * FROM users WHERE name = \\\"{username}\\\"')\n"
+    }
+  ],
+  "property": "A FastAPI scalar route parameter reaches a SQL execution helper through an interpolated query.",
+  "expected": { "vulnerable": true, "ruleId": "PY-SQL-INJECTION-001" },
+  "notes": ["Framework holdout: FastAPI route parameter plus helper sink."]
+}

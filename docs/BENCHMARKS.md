@@ -174,6 +174,20 @@ The runner verifies the checkout HEAD, copies it read-only into an isolated
 temporary case workspace, excludes `.git`, dependencies, build output, and
 audit configuration, then records the resulting source tree digest.
 
+The checked-in `framework-holdout` split adds five dependency-free cases for
+FastAPI SQL/NoSQL flows, Django object ownership, Flask uploads, and a safe
+fixed-key NoSQL control. Run it with the pinned manifest:
+
+```bash
+evo-audit benchmark ./benchmark/cases \
+  --manifest ./benchmark/benchmark-manifest.json \
+  --split framework-holdout --min-recall 1 --min-precision 1 --max-fpr 0
+```
+
+The current deterministic observation is candidate precision `1.000`, recall
+`1.000`, and FPR `0.000` on these five cases; it remains a holdout observation,
+and reportable recall is `0.000` until independent validation runs.
+
 [RepoAudit](https://arxiv.org/abs/2501.18160) is an important research baseline:
 it combines repository exploration, data-flow facts, path-condition checks, and
 a validator. Its published numbers are paper-reported reference points, not

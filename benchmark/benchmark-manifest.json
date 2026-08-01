@@ -85,6 +85,36 @@
       "caseId": "js-dynamic-validator-gate-001",
       "split": "validator",
       "sha256": "0fdc47a4497856028b4863664fd43bdcdeb84fbf3dd66836d581e150ef4c62a4"
+    },
+    {
+      "file": "cases/python-django-idor-001.json",
+      "caseId": "framework-django-idor-001",
+      "split": "framework-holdout",
+      "sha256": "75a24fe79bfab85f3a769f6b31a838676c50058942b09693360e5a98694510b8"
+    },
+    {
+      "file": "cases/python-fastapi-nosql-001.json",
+      "caseId": "framework-fastapi-nosql-001",
+      "split": "framework-holdout",
+      "sha256": "f7d6754ffb77d7a9fac2436a8b2022a29cf436d356c3584f4d2b0cad2bb077b8"
+    },
+    {
+      "file": "cases/python-fastapi-safe-nosql-001.json",
+      "caseId": "framework-fastapi-safe-nosql-001",
+      "split": "framework-holdout",
+      "sha256": "8e9509f0dfa051d3b6f7496720b4e557adca6e7f1f990ef671060799e391b162"
+    },
+    {
+      "file": "cases/python-fastapi-sql-001.json",
+      "caseId": "framework-fastapi-sql-001",
+      "split": "framework-holdout",
+      "sha256": "67d3a9309e2f80c151abbdd598df1c7b33f15db146c4bd80c9ce16d4dc878bdb"
+    },
+    {
+      "file": "cases/python-flask-upload-001.json",
+      "caseId": "framework-flask-upload-001",
+      "split": "framework-holdout",
+      "sha256": "eb7f2de6d5ac06bab6c24ce076a09f80e0eb5e9eb9d2763ada167a1012312b08"
     }
   ],
   "notes": [

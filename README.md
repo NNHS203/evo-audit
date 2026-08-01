@@ -231,6 +231,10 @@ with external comparison rules in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 The workflow rationale and research references are documented in
 [`docs/WORKFLOW.md`](docs/WORKFLOW.md).
 
+The pinned local manifest also includes a `framework-holdout` split covering
+FastAPI, Django, and Flask flows; it is scored separately from the fast
+development gate.
+
 ## Safety boundary
 
 Evo Audit is local-first and model-agnostic. It does not execute production
