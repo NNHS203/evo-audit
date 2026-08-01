@@ -76,6 +76,9 @@ evo-audit score ./realvuln-ground-truth.json ./bandit.json \
 evo-audit realvuln ./Real-Vuln-Benchmark \
   realvuln-damn-vulnerable-flask-application --output ./realvuln-runs
 
+# Audit every manifest entry and keep blocked upstream entries explicit.
+evo-audit realvuln ./Real-Vuln-Benchmark --all --output ./realvuln-runs
+
 # Inspect the prioritized investigation and validation queue.
 evo-audit plan ./audit-runs/<run>/run.json
 

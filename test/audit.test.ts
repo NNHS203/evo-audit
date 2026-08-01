@@ -21,6 +21,7 @@ import { deduplicateRun } from "../src/dedup.js";
 import { buildRevalidationPlan } from "../src/revalidation.js";
 import { evaluateBenchmark, runBenchmark, type BenchmarkReport } from "../src/benchmark.js";
 import { groundTruthLabelsFromValue, scannerFindingsFromBandit, scannerFindingsFromSarif, scoreScannerFindings } from "../src/scoring.js";
+import { runRealVulnAll } from "../src/realvuln.js";
 
 test("candidate detection masks fixtures, comments, and descriptions but keeps code", () => {
   const source = [
@@ -727,6 +728,23 @@ test("scanner scoring separates candidate and evidence-gated reportable performa
   const collisionScore = scoreScannerFindings(collisionFindings, collisionLabels);
   assert.equal(collisionScore.candidate.truePositive, 2);
   assert.equal(collisionScore.candidate.falsePositive, 0);
+});
+
+test("RealVuln aggregate records malformed manifest entries as blocked", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-realvuln-aggregate-"));
+  await writeFile(path.join(root, "benchmark-manifest.json"), JSON.stringify({
+    schema_version: "1",
+    benchmark_version: "2.0.0",
+    repos: { malformed: { repo_url: "https://example.invalid/repo", commit_sha: "short" } },
+  }), "utf8");
+
+  const aggregate = await runRealVulnAll(root, { output: path.join(root, "runs") });
+  assert.equal(aggregate.repositories, 1);
+  assert.equal(aggregate.completed, 0);
+  assert.equal(aggregate.blocked, 1);
+  assert.equal(aggregate.entries[0]?.status, "BLOCKED");
+  assert.match(aggregate.entries[0]?.error ?? "", /full commit SHA/i);
+  assert.equal((await readFile(path.join(root, "runs", "realvuln-aggregate.json"), "utf8")).includes('"status": "BLOCKED"'), true);
 });
 
 test("benchmark runner can audit a pinned-style local checkout source", async () => {

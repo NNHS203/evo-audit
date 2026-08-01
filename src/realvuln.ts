@@ -50,12 +50,105 @@ export interface RealVulnReport {
   notes: string[];
 }
 
+export interface RealVulnAggregateReport {
+  schemaVersion: 1;
+  benchmark: "RealVuln";
+  benchmarkVersion: string;
+  groundTruthVersion?: string;
+  benchmarkManifest: string;
+  repositories: number;
+  completed: number;
+  blocked: number;
+  aggregate: ScannerScore;
+  entries: Array<{
+    id: string;
+    status: "COMPLETED" | "BLOCKED";
+    url: string;
+    commit: string;
+    language?: string;
+    framework?: string | null;
+    report?: string;
+    score?: ScannerScore;
+    error?: string;
+  }>;
+  notes: string[];
+}
+
 function sha256(value: Buffer): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
 function git(root: string, args: string[]): string {
   return execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+}
+
+function f3(precision: number, recall: number): number {
+  if (precision + recall === 0) return 0;
+  return (10 * precision * recall) / (9 * precision + recall);
+}
+
+function aggregateCounts(scores: ScannerScore[], reportable: boolean): ScannerScore["candidate"] {
+  const counts = scores.reduce((total, score) => {
+    const channel = reportable ? score.reportable : score.candidate;
+    return {
+      truePositive: total.truePositive + channel.truePositive,
+      falsePositive: total.falsePositive + channel.falsePositive,
+      falseNegative: total.falseNegative + channel.falseNegative,
+      trueNegative: total.trueNegative + channel.trueNegative,
+      candidateCount: total.candidateCount + channel.candidateCount,
+      validatedCount: total.validatedCount + channel.validatedCount,
+    };
+  }, { truePositive: 0, falsePositive: 0, falseNegative: 0, trueNegative: 0, candidateCount: 0, validatedCount: 0 });
+  const positivePredictions = counts.truePositive + counts.falsePositive;
+  const actualPositives = counts.truePositive + counts.falseNegative;
+  const negativeLabels = counts.trueNegative + counts.falsePositive;
+  const precision = positivePredictions === 0 ? 0 : counts.truePositive / positivePredictions;
+  const recall = actualPositives === 0 ? 0 : counts.truePositive / actualPositives;
+  return {
+    ...counts,
+    precision,
+    recall,
+    falsePositiveRate: negativeLabels === 0 ? 0 : counts.falsePositive / negativeLabels,
+    f3: f3(precision, recall),
+    tokensPerValidatedFinding: null,
+  };
+}
+
+function aggregateScores(scores: ScannerScore[]): ScannerScore {
+  const candidate = aggregateCounts(scores, false);
+  const reportable = aggregateCounts(scores, true);
+  const inputTokens = scores.reduce((sum, score) => sum + score.inputTokens, 0);
+  const outputTokens = scores.reduce((sum, score) => sum + score.outputTokens, 0);
+  const durationMs = scores.reduce((sum, score) => sum + score.durationMs, 0);
+  candidate.tokensPerValidatedFinding = candidate.validatedCount > 0 ? (inputTokens + outputTokens) / candidate.validatedCount : null;
+  reportable.tokensPerValidatedFinding = reportable.validatedCount > 0 ? (inputTokens + outputTokens) / reportable.validatedCount : null;
+  return {
+    schemaVersion: 1,
+    scanner: "evo-audit",
+    labels: scores.reduce((sum, score) => sum + score.labels, 0),
+    vulnerableLabels: scores.reduce((sum, score) => sum + score.vulnerableLabels, 0),
+    safeLabels: scores.reduce((sum, score) => sum + score.safeLabels, 0),
+    findings: scores.reduce((sum, score) => sum + score.findings, 0),
+    unsupportedClaimCount: scores.reduce((sum, score) => sum + score.unsupportedClaimCount, 0),
+    unsupportedClaimRate: scores.reduce((sum, score) => sum + score.findings, 0) === 0
+      ? 0
+      : scores.reduce((sum, score) => sum + score.unsupportedClaimCount, 0) / scores.reduce((sum, score) => sum + score.findings, 0),
+    candidate,
+    reportable,
+    inputTokens,
+    outputTokens,
+    durationMs,
+    notes: [
+      "Aggregate metrics sum one-to-one labels across completed pinned repositories only.",
+      "Blocked repositories are excluded from denominators and remain explicit entries; they are not clean results.",
+      "Candidate and reportable channels are scored separately.",
+    ],
+  };
+}
+
+function boundedError(error: unknown): string {
+  const value = error instanceof Error ? error.message : String(error);
+  return value.replace(/\s+/g, " ").slice(0, 800);
 }
 
 function repositoryFromManifest(manifest: RealVulnManifest, repoId: string): RealVulnRepository {
@@ -131,4 +224,69 @@ export async function runRealVuln(
   } finally {
     await fs.rm(tempParent, { recursive: true, force: true });
   }
+}
+
+export async function runRealVulnAll(
+  benchmarkRoot: string,
+  options: { output: string; keepCheckout?: boolean },
+): Promise<RealVulnAggregateReport> {
+  const manifestPath = path.join(benchmarkRoot, "benchmark-manifest.json");
+  const manifest = await readJson<RealVulnManifest>(manifestPath);
+  if (!manifest || typeof manifest.benchmark_version !== "string" || !manifest.repos) throw new Error(`Invalid RealVuln manifest: ${manifestPath}`);
+  const output = path.resolve(options.output);
+  await fs.mkdir(output, { recursive: true });
+  const entries: RealVulnAggregateReport["entries"] = [];
+  const scores: ScannerScore[] = [];
+  for (const repoId of Object.keys(manifest.repos).sort()) {
+    const rawRepository = manifest.repos[repoId] as Partial<RealVulnRepository> | undefined;
+    const fallbackUrl = typeof rawRepository?.repo_url === "string" ? rawRepository.repo_url : "";
+    const fallbackCommit = typeof rawRepository?.commit_sha === "string" ? rawRepository.commit_sha : "";
+    const fallbackLanguage = typeof rawRepository?.language === "string" ? rawRepository.language : undefined;
+    const fallbackFramework = typeof rawRepository?.framework === "string" ? rawRepository.framework : rawRepository?.framework === null ? null : undefined;
+    const repoOutput = path.join(output, repoId.replace(/[^A-Za-z0-9._-]+/g, "_"));
+    try {
+      const repository = repositoryFromManifest(manifest, repoId);
+      const report = await runRealVuln(benchmarkRoot, repoId, { output: repoOutput, keepCheckout: options.keepCheckout });
+      scores.push(report.score);
+      entries.push({
+        id: repoId,
+        status: "COMPLETED",
+        url: repository.repo_url,
+        commit: repository.commit_sha,
+        language: repository.language,
+        framework: repository.framework,
+        report: path.relative(output, path.join(repoOutput, "realvuln-report.json")).split(path.sep).join("/"),
+        score: report.score,
+      });
+    } catch (error) {
+      entries.push({
+        id: repoId,
+        status: "BLOCKED",
+        url: fallbackUrl,
+        commit: fallbackCommit,
+        language: fallbackLanguage,
+        framework: fallbackFramework,
+        error: boundedError(error),
+      });
+    }
+  }
+  const aggregate: RealVulnAggregateReport = {
+    schemaVersion: 1,
+    benchmark: "RealVuln",
+    benchmarkVersion: manifest.benchmark_version,
+    groundTruthVersion: manifest.ground_truth_version,
+    benchmarkManifest: manifestPath,
+    repositories: entries.length,
+    completed: entries.filter((entry) => entry.status === "COMPLETED").length,
+    blocked: entries.filter((entry) => entry.status === "BLOCKED").length,
+    aggregate: aggregateScores(scores),
+    entries,
+    notes: [
+      "This aggregate is reproducible only with the recorded upstream manifest revision, repository commits, playbook, scanner commit, and execution policy.",
+      "A clone, ground-truth, or audit failure is recorded as BLOCKED and excluded from aggregate denominators; it is never silently treated as safe.",
+      "Independent runtime validation is still required before candidate findings become reportable vulnerabilities.",
+    ],
+  };
+  await writeJson(path.join(output, "realvuln-aggregate.json"), aggregate);
+  return aggregate;
 }

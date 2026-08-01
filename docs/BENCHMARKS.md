@@ -43,6 +43,18 @@ evo-audit realvuln ./Real-Vuln-Benchmark \
   realvuln-damn-vulnerable-flask-application --output ./realvuln-runs
 ```
 
+To audit the complete manifest and emit one aggregate report, run:
+
+```bash
+evo-audit realvuln ./Real-Vuln-Benchmark --all --output ./realvuln-runs
+```
+
+Each manifest entry is isolated in its own output directory. Clone failures,
+missing upstream repositories, malformed pins, and ground-truth failures are
+recorded as `BLOCKED`; they are excluded from score denominators but never
+treated as safe. The aggregate is therefore useful for reproducible coverage
+accounting as well as detection scoring.
+
 The adapter verifies the manifest's full checkout commit and records the
 ground-truth SHA-256, audited tree digest, and run artifact. It does not claim
 that one repository is a benchmark-wide score; use the same command for each
@@ -72,6 +84,17 @@ multiline call context, write-vs-read file semantics, and same-source sink
 deduplication. DjanGoat's remaining single false positive is a published
 ground-truth location mismatch for the pay-record deletion described at the
 actual sink line; it is preserved in the score rather than silently corrected.
+
+The first full-manifest run is checked in separately as an observed corpus
+baseline: [RealVuln v2 aggregate](../benchmark/results/realvuln-v2-aggregate-20260801.json).
+It completed 62/66 manifest entries and blocked four entries whose published
+GitHub URLs were no longer available. Across the 2,018 labels in completed
+repositories, candidate precision was `0.464`, candidate recall `0.174`, FPR
+`0.592`, and F3 `0.186`; reportable recall was `0.000` because no independent
+runtime validator was supplied. This is the honest current corpus result,
+not a claim of superiority over OpenAI, Cloudflare, or research baselines.
+The gap makes framework coverage, candidate ranking, and independent
+model-backed/runtime validation the next optimization targets.
 
 The checked-in records include the full upstream commit, ground-truth hash,
 audited tree digest, line tolerance, scanner commit, and the separate

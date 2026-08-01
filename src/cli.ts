@@ -13,7 +13,7 @@ import { executeWorkerTask } from "./worker-runner.js";
 import { evaluateBenchmark, runBenchmark } from "./benchmark.js";
 import { buildRevalidationPlan } from "./revalidation.js";
 import { groundTruthLabelsFromValue, scannerFindingsFromBandit, scannerFindingsFromRun, scannerFindingsFromSarif, scoreScannerFindings, type GroundTruthFormat } from "./scoring.js";
-import { runRealVuln } from "./realvuln.js";
+import { runRealVuln, runRealVulnAll } from "./realvuln.js";
 import type { AuditRun, AuditWorkerResult, ValidationResult } from "./types.js";
 
 function usage(): string {
@@ -41,6 +41,7 @@ Commands:
   worker <run.json> --all             Run pending worker tasks with bounded concurrency
   benchmark <cases-dir>               Run benchmark cases (optional --model auto)
   realvuln <benchmark-root> <repo-id>  Clone a pinned RealVuln repo and emit a scored report
+  realvuln <benchmark-root> --all       Audit every manifest entry and emit an aggregate
   evolve <run.json> [--output FILE]   Propose playbook improvements from audit gaps
   report <run.json> [--format FORMAT] Print text, json, or sarif
 
@@ -114,7 +115,22 @@ async function main(): Promise<void> {
   }
 
   if (command === "realvuln") {
-    if (!input || !secondInput) throw new Error("realvuln requires the RealVuln checkout root and repo-id");
+    if (!input || (!secondInput && !flag(args, "--all"))) throw new Error("realvuln requires the RealVuln checkout root and repo-id or --all");
+    if (flag(args, "--all") && secondInput && secondInput !== "--all") throw new Error("realvuln --all cannot be combined with a repo-id");
+    if (flag(args, "--all")) {
+      const aggregate = await runRealVulnAll(path.resolve(cwd, input), {
+        output: path.resolve(cwd, valueFlag(args, "--output", "realvuln-runs")),
+        keepCheckout: flag(args, "--keep-checkout"),
+      });
+      if (flag(args, "--json")) console.log(JSON.stringify(aggregate, null, 2));
+      else {
+        console.log(`RealVuln aggregate: ${aggregate.completed}/${aggregate.repositories} completed, ${aggregate.blocked} blocked`);
+        console.log(`Candidate F3=${aggregate.aggregate.candidate.f3.toFixed(3)} precision=${aggregate.aggregate.candidate.precision.toFixed(3)} recall=${aggregate.aggregate.candidate.recall.toFixed(3)} false-positive-rate=${aggregate.aggregate.candidate.falsePositiveRate.toFixed(3)}`);
+        console.log(`Reportable F3=${aggregate.aggregate.reportable.f3.toFixed(3)} precision=${aggregate.aggregate.reportable.precision.toFixed(3)} recall=${aggregate.aggregate.reportable.recall.toFixed(3)}`);
+        console.log(`Aggregate report: ${path.join(path.resolve(cwd, valueFlag(args, "--output", "realvuln-runs")), "realvuln-aggregate.json")}`);
+      }
+      return;
+    }
     const report = await runRealVuln(path.resolve(cwd, input), secondInput, {
       output: path.resolve(cwd, valueFlag(args, "--output", "realvuln-runs")),
       keepCheckout: flag(args, "--keep-checkout"),
