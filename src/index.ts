@@ -16,3 +16,4 @@ export * from "./validation-runner.js";
 export * from "./benchmark.js";
 export * from "./dedup.js";
 export * from "./threat.js";
+export * from "./revalidation.js";

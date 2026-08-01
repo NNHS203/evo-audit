@@ -277,6 +277,8 @@ export interface TokenAccounting {
   outputTokens: number;
   cachedTokens: number;
   estimatedCostUsd: number;
+  /** Wall-clock time spent in a model/worker call, when available. */
+  durationMs?: number;
   source: "DETERMINISTIC" | "WORKER_REPORTED" | "UNKNOWN";
 }
 
@@ -286,6 +288,7 @@ export interface TokenUsageTotals {
   cachedTokens: number;
   totalTokens: number;
   estimatedCostUsd: number;
+  durationMs: number;
 }
 
 export interface AuditSessionUsage {

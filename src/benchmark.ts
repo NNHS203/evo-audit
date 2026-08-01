@@ -36,7 +36,21 @@ export interface BenchmarkCaseResult {
   findings: Array<Pick<Finding, "ruleId" | "status" | "evidenceTier" | "locations">>;
   coverageUnknown: boolean;
   tokenTotal: number;
+  durationMs: number;
   runId: string;
+}
+
+export interface BenchmarkAcceptancePolicy {
+  minCandidateRecall?: number;
+  minCandidatePrecision?: number;
+  maxFalsePositiveRate?: number;
+  maxUnknownCoverageRate?: number;
+}
+
+export interface BenchmarkAcceptance {
+  accepted: boolean;
+  policy: BenchmarkAcceptancePolicy;
+  failures: string[];
 }
 
 export interface BenchmarkReport {
@@ -53,6 +67,7 @@ export interface BenchmarkReport {
     matchingCandidateRecall: number;
     unknownCoverageRate: number;
     tokensPerCase: number;
+    durationMsPerCase: number;
   };
   notes: string[];
 }
@@ -86,7 +101,9 @@ async function runCase(item: BenchmarkCase): Promise<BenchmarkCaseResult> {
     const sourceFile = sourceFileFor(item);
     await fs.mkdir(path.dirname(path.join(root, sourceFile)), { recursive: true });
     await fs.writeFile(path.join(root, sourceFile), item.code, "utf8");
+    const startedAt = Date.now();
     const result = await runAudit(root, { output: path.join(root, "runs") });
+    const durationMs = Math.max(0, Date.now() - startedAt);
     const vulnerable = expectedVulnerable(item.expected);
     const candidateFound = result.run.findings.length > 0;
     const matchingCandidate = item.expected.ruleId
@@ -103,6 +120,7 @@ async function runCase(item: BenchmarkCase): Promise<BenchmarkCaseResult> {
       findings: result.run.findings.map(({ ruleId, status, evidenceTier, locations }) => ({ ruleId, status, evidenceTier, locations })),
       coverageUnknown: result.run.plan?.tasks.some((task) => task.phase === "HUNT" && task.status !== "COMPLETED") ?? true,
       tokenTotal: result.run.tokenAccounting.inputTokens + result.run.tokenAccounting.outputTokens,
+      durationMs,
       runId: result.run.runId,
     };
   } finally {
@@ -136,6 +154,7 @@ export async function runBenchmark(directory: string, split?: string): Promise<B
       matchingCandidateRecall: expected.length === 0 ? 1 : matching.length / expected.length,
       unknownCoverageRate: results.length === 0 ? 0 : unknown.length / results.length,
       tokensPerCase: tokenTotal / results.length,
+      durationMsPerCase: results.reduce((sum, item) => sum + item.durationMs, 0) / results.length,
     },
     notes: [
       "This runner measures deterministic candidate discovery; it does not claim production vulnerability recall.",
@@ -143,4 +162,20 @@ export async function runBenchmark(directory: string, split?: string): Promise<B
       "Holdout cases must not be used to tune detectors, prompts, or model routing.",
     ],
   };
+}
+
+function metricFailure(name: string, actual: number, comparator: "min" | "max", threshold: number): string | null {
+  if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) throw new Error(`${name} threshold must be between 0 and 1.`);
+  const passed = comparator === "min" ? actual >= threshold : actual <= threshold;
+  return passed ? null : `${name}=${actual.toFixed(3)} violates ${comparator}=${threshold.toFixed(3)}`;
+}
+
+export function evaluateBenchmark(report: BenchmarkReport, policy: BenchmarkAcceptancePolicy = {}): BenchmarkAcceptance {
+  const failures = [
+    policy.minCandidateRecall === undefined ? null : metricFailure("candidateRecall", report.metrics.candidateRecall, "min", policy.minCandidateRecall),
+    policy.minCandidatePrecision === undefined ? null : metricFailure("candidatePrecision", report.metrics.candidatePrecision, "min", policy.minCandidatePrecision),
+    policy.maxFalsePositiveRate === undefined ? null : metricFailure("falsePositiveRate", report.metrics.falsePositiveRate, "max", policy.maxFalsePositiveRate),
+    policy.maxUnknownCoverageRate === undefined ? null : metricFailure("unknownCoverageRate", report.metrics.unknownCoverageRate, "max", policy.maxUnknownCoverageRate),
+  ].filter((failure): failure is string => failure !== null);
+  return { accepted: failures.length === 0, policy, failures };
 }

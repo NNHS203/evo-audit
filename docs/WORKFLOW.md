@@ -131,6 +131,12 @@ ground truth, scanner outputs, and scoring code, and gives recall-weighted F3
 with unfinished repositories counted as misses:
 <https://realvuln.kolega.dev/>.
 
+`revalidate before.json after.json` materializes the comparison as a release
+decision artifact. New findings require validation, previously verified
+findings that disappear remain `UNKNOWN` until the after run proves validated
+semantic coverage, and a still-verified finding is marked as a blocking
+regression.
+
 ## Current implementation boundary
 
 The repository currently implements the snapshot, recon, AST/data-flow graph,

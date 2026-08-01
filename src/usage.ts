@@ -3,8 +3,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { AuditRun, AuditSessionUsage, TokenAccounting, TokenUsageTotals } from "./types.js";
 
-function nonNegative(value: number): number {
-  return Number.isFinite(value) && value >= 0 ? value : 0;
+function nonNegative(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
 }
 
 export function tokenUsageTotals(accounting: TokenAccounting): TokenUsageTotals {
@@ -16,11 +16,12 @@ export function tokenUsageTotals(accounting: TokenAccounting): TokenUsageTotals 
     cachedTokens: nonNegative(accounting.cachedTokens),
     totalTokens: inputTokens + outputTokens,
     estimatedCostUsd: nonNegative(accounting.estimatedCostUsd),
+    durationMs: nonNegative(accounting.durationMs),
   };
 }
 
 function zeroUsage(): TokenUsageTotals {
-  return { inputTokens: 0, outputTokens: 0, cachedTokens: 0, totalTokens: 0, estimatedCostUsd: 0 };
+  return { inputTokens: 0, outputTokens: 0, cachedTokens: 0, totalTokens: 0, estimatedCostUsd: 0, durationMs: 0 };
 }
 
 function sumUsage(usages: TokenUsageTotals[]): TokenUsageTotals {
@@ -31,6 +32,7 @@ function sumUsage(usages: TokenUsageTotals[]): TokenUsageTotals {
       cachedTokens: total.cachedTokens + usage.cachedTokens,
       totalTokens: total.totalTokens + usage.totalTokens,
       estimatedCostUsd: total.estimatedCostUsd + usage.estimatedCostUsd,
+      durationMs: total.durationMs + nonNegative(usage.durationMs),
     }),
     zeroUsage(),
   );
@@ -68,4 +70,8 @@ export async function recordSessionUsage(sessionDirectory: string, run: AuditRun
 
 export function formatTokenUsage(usage: TokenUsageTotals): string {
   return `total=${usage.totalTokens} (input=${usage.inputTokens}, output=${usage.outputTokens}, cached=${usage.cachedTokens})`;
+}
+
+export function formatLatency(durationMs: number): string {
+  return `${Math.round(nonNegative(durationMs))}ms`;
 }

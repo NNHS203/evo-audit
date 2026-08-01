@@ -41,6 +41,8 @@ Run the deterministic baseline over the checked-in cases:
 ```bash
 evo-audit benchmark ./benchmark/cases
 evo-audit benchmark ./benchmark/cases --split development --json
+evo-audit benchmark ./benchmark/cases --split development \
+  --min-recall 1 --min-precision 1 --max-fpr 0
 ```
 
 The runner creates an isolated temporary workspace for each case, records the
@@ -50,3 +52,8 @@ traps, unknown-coverage rate, and tokens per case. These are discovery metrics;
 they are not a claim of real-world vulnerability recall. A later model-backed
 runner must preserve the same case IDs and add validator evidence before
 reporting validated metrics.
+
+Threshold flags turn the discovery metrics into a CI acceptance gate and exit
+non-zero on regression. The gate intentionally does not assert that unknown
+coverage is safe; use `--max-unknown` only when a benchmark has an explicit
+coverage-completion contract.

@@ -59,6 +59,10 @@ evo-audit validate-run ./audit-runs/<run>/run.json ./validation-request.json
 # Track root causes across scans, without treating incomplete coverage as clean.
 evo-audit compare ./before/run.json ./after/run.json
 
+# Build a fix/regression plan; disappeared verified findings remain actionable
+# until the after snapshot has validated semantic coverage.
+evo-audit revalidate ./before/run.json ./after/run.json
+
 # Inspect the prioritized investigation and validation queue.
 evo-audit plan ./audit-runs/<run>/run.json
 
@@ -83,12 +87,16 @@ session total after `review`, `ingest`, and `validate`:
 
 ```text
 Tokens: current total=1500 (input=1200, output=300, cached=100)
+Latency: current=420ms
 Session total: total=1500 (...) across 1 run(s)
+Session latency: 420ms
 ```
 
 Updating the same run replaces its previous contribution, so replaying an
 ingest or validation does not double-count tokens. `totalTokens` is defined as
 input plus output; cached tokens are shown separately for transparency.
+`durationMs` records provider/worker wall-clock time when available and is
+summed across the session; deterministic scans report zero model latency.
 Worker tasks also carry a deterministic receipt keyed by snapshot, task,
 model, and prompt. Re-ingesting the same receipt is idempotent, and local
 worker-cache hits do not add provider tokens.

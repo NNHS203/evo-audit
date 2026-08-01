@@ -10,7 +10,8 @@ import { mergeWorkerResult } from "./workers.js";
 import { buildAuditPlan, planSummary } from "./workflow.js";
 import { authorizeModel, loadModelConfig, ModelRegistry } from "./models.js";
 import { executeWorkerTask } from "./worker-runner.js";
-import { runBenchmark } from "./benchmark.js";
+import { evaluateBenchmark, runBenchmark } from "./benchmark.js";
+import { buildRevalidationPlan } from "./revalidation.js";
 import type { AuditRun, AuditWorkerResult, ValidationResult } from "./types.js";
 
 function usage(): string {
@@ -28,6 +29,7 @@ Commands:
   validate <run.json> <result.json>   Apply an independent validator result
   validate-run <run.json> <request.json> Execute a request in a container sandbox
   compare <before.json> <after.json> Compare findings by root cause across runs
+  revalidate <before.json> <after.json> Build a fix/regression validation plan
   plan <run.json> [--json]            Show prioritized investigation/validation tasks
   status <run.json>                   Show coverage and pending obligations
   resume <run.json> [--output FILE]   Write a resumable pending-work plan
@@ -50,6 +52,14 @@ function valueFlag(args: string[], name: string, fallback: string): string {
   return index >= 0 && args[index + 1] ? args[index + 1] : fallback;
 }
 
+function numberFlag(args: string[], name: string): number | undefined {
+  const value = valueFlag(args, name, "");
+  if (!value) return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) throw new Error(`${name} requires a numeric value.`);
+  return parsed;
+}
+
 async function main(): Promise<void> {
   const [, , command, input, secondInput] = process.argv;
   const args = process.argv.slice(2);
@@ -69,12 +79,23 @@ async function main(): Promise<void> {
   if (command === "benchmark") {
     if (!input) throw new Error("benchmark requires a cases directory");
     const report = await runBenchmark(path.resolve(cwd, input), valueFlag(args, "--split", "") || undefined);
+    const acceptance = evaluateBenchmark(report, {
+      minCandidateRecall: numberFlag(args, "--min-recall"),
+      minCandidatePrecision: numberFlag(args, "--min-precision"),
+      maxFalsePositiveRate: numberFlag(args, "--max-fpr"),
+      maxUnknownCoverageRate: numberFlag(args, "--max-unknown"),
+    });
     if (flag(args, "--json")) console.log(JSON.stringify(report, null, 2));
     else {
       console.log(`Benchmark ${report.split}: ${report.metrics.cases} cases`);
-      console.log(`Candidate recall=${report.metrics.candidateRecall.toFixed(3)} precision=${report.metrics.candidatePrecision.toFixed(3)} false-positive-rate=${report.metrics.falsePositiveRate.toFixed(3)} unknown-coverage=${report.metrics.unknownCoverageRate.toFixed(3)} tokens/case=${report.metrics.tokensPerCase.toFixed(0)}`);
-      for (const item of report.cases) console.log(`- ${item.caseId}: ${item.expectedVulnerable ? "vulnerable" : "safe"} candidate=${item.candidateFound} match=${item.matchingCandidate} unknown=${item.coverageUnknown}`);
+      console.log(`Candidate recall=${report.metrics.candidateRecall.toFixed(3)} precision=${report.metrics.candidatePrecision.toFixed(3)} false-positive-rate=${report.metrics.falsePositiveRate.toFixed(3)} unknown-coverage=${report.metrics.unknownCoverageRate.toFixed(3)} tokens/case=${report.metrics.tokensPerCase.toFixed(0)} duration/case=${report.metrics.durationMsPerCase.toFixed(0)}ms`);
+      for (const item of report.cases) console.log(`- ${item.caseId}: ${item.expectedVulnerable ? "vulnerable" : "safe"} candidate=${item.candidateFound} match=${item.matchingCandidate} unknown=${item.coverageUnknown} duration=${item.durationMs}ms`);
+      if (acceptance.policy.minCandidateRecall !== undefined || acceptance.policy.minCandidatePrecision !== undefined || acceptance.policy.maxFalsePositiveRate !== undefined || acceptance.policy.maxUnknownCoverageRate !== undefined) {
+        console.log(`Acceptance: ${acceptance.accepted ? "PASS" : "FAIL"}`);
+        for (const failure of acceptance.failures) console.log(`  - ${failure}`);
+      }
     }
+    if (!acceptance.accepted) throw new Error(`Benchmark acceptance failed: ${acceptance.failures.join("; ")}`);
     return;
   }
 
@@ -199,6 +220,23 @@ async function main(): Promise<void> {
       console.log(`Compare ${comparison.beforeRunId} -> ${comparison.afterRunId}`);
       console.log(`Coverage: ${comparison.coverage.complete ? "complete" : "unknown"}  ${comparison.coverage.note}`);
       for (const item of comparison.findings) console.log(`- [${item.lifecycle}] ${item.identity}`);
+    }
+    return;
+  }
+
+  if (command === "revalidate") {
+    if (!input || !secondInput) throw new Error("revalidate requires before.json and after.json");
+    const before = await readJson<AuditRun>(path.resolve(cwd, input));
+    const after = await readJson<AuditRun>(path.resolve(cwd, secondInput));
+    const plan = buildRevalidationPlan(before, after);
+    const output = path.resolve(cwd, valueFlag(args, "--output", path.join(path.dirname(path.resolve(cwd, secondInput)), "revalidation.json")));
+    await writeJson(output, plan);
+    if (flag(args, "--json")) console.log(JSON.stringify(plan, null, 2));
+    else {
+      console.log(`Revalidation ${plan.beforeRunId} -> ${plan.afterRunId}: ${plan.status}`);
+      console.log(`Actions: ${plan.items.filter((item) => item.action !== "NO_ACTION").length}  blocking=${plan.blockingIdentities.length}`);
+      for (const item of plan.items) console.log(`- [${item.action}] ${item.lifecycle} ${item.identity}: ${item.reason}`);
+      console.log(`Artifact: ${output}`);
     }
     return;
   }

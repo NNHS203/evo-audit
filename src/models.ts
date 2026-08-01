@@ -299,8 +299,12 @@ export class ModelRegistry {
       const reference = model.auth.method === "OAUTH" ? `Run evo-audit auth . ${model.id}` : `set ${model.auth.apiKeyEnv ?? "the configured API-key environment variable"}`;
       throw new Error(`No credential is available for model ${model.id}. ${reference}.`);
     }
-    if (model.transport === "ANTHROPIC") return completeAnthropic(model, credential, request);
-    return completeOpenAI(model, credential, request);
+    const startedAt = Date.now();
+    const response = model.transport === "ANTHROPIC"
+      ? await completeAnthropic(model, credential, request)
+      : await completeOpenAI(model, credential, request);
+    response.usage = { ...response.usage, durationMs: Math.max(0, Date.now() - startedAt) };
+    return response;
   }
 }
 

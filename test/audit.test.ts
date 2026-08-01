@@ -17,6 +17,8 @@ import { loadModelConfig, ModelRegistry } from "../src/models.js";
 import { workerResultFromCompletion } from "../src/worker-runner.js";
 import { runValidationRequest } from "../src/validation-runner.js";
 import { deduplicateRun } from "../src/dedup.js";
+import { buildRevalidationPlan } from "../src/revalidation.js";
+import { evaluateBenchmark, type BenchmarkReport } from "../src/benchmark.js";
 
 test("candidate detection masks fixtures, comments, and descriptions but keeps code", () => {
   const source = [
@@ -66,10 +68,11 @@ test("run persists replayable evidence artifacts", async () => {
   const workerUpdated = mergeWorkerResult(run, {
     worker: "usage-worker",
     findings: [],
-    tokenAccounting: { inputTokens: 1200, outputTokens: 300, cachedTokens: 100, estimatedCostUsd: 0.04 },
+    tokenAccounting: { inputTokens: 1200, outputTokens: 300, cachedTokens: 100, estimatedCostUsd: 0.04, durationMs: 40 },
   });
   const sessionAfterWorker = await persistRunArtifacts(artifactDir, workerUpdated);
   assert.equal(sessionAfterWorker.total.totalTokens, 1500);
+  assert.equal(sessionAfterWorker.total.durationMs, 40);
   assert.equal(sessionAfterWorker.runs.length, 1);
   const sessionAfterReplay = await persistRunArtifacts(artifactDir, workerUpdated);
   assert.equal(sessionAfterReplay.total.totalTokens, 1500);
@@ -117,6 +120,26 @@ test("recon builds bounded graph context and the plan enforces the worker token 
     tokenAccounting: { inputTokens: 901, outputTokens: 1 },
   });
   assert.equal(overBudget.plan?.tasks.find((task) => task.id === `investigate:${run.findings[0].id}`)?.status, "BLOCKED");
+
+  const firstWorkerTask = run.plan?.tasks.find((task) => task.phase === "INVESTIGATE" && task.status === "PENDING");
+  assert.ok(firstWorkerTask);
+  const afterFirstHunt = mergeWorkerResult(run, {
+    worker: "budget-worker",
+    taskId: firstWorkerTask.id,
+    findings: [],
+    tokenAccounting: { inputTokens: 400, outputTokens: 100 },
+  });
+  assert.equal((afterFirstHunt.plan?.allocatedTokens ?? 0) <= 900, true);
+  const secondWorkerTask = afterFirstHunt.plan?.tasks.find((task) => ["HUNT", "INVESTIGATE"].includes(task.phase) && task.status === "PENDING");
+  if (secondWorkerTask) {
+    const afterSecondHunt = mergeWorkerResult(afterFirstHunt, {
+      worker: "budget-worker",
+      taskId: secondWorkerTask.id,
+      findings: [],
+      tokenAccounting: { inputTokens: 100, outputTokens: 100 },
+    });
+    assert.equal((afterSecondHunt.plan?.allocatedTokens ?? 0) <= 900, true);
+  }
 });
 
 test("AST graph finds an indirect source-to-command-sink path without flagging a fixed command", async () => {
@@ -264,7 +287,9 @@ test("OpenAI-compatible provider normalizes completion text and token usage", as
     const response = await registry.complete({ phase: "HUNT", priority: 80, estimatedInputTokens: 20, budgetTokens: 400, messages: [{ role: "user", content: "test" }] });
     assert.equal(response.text, "{\"findings\":[]}");
     assert.equal(response.requestId, "provider-test-1");
-    assert.deepEqual(response.usage, { inputTokens: 40, outputTokens: 12, cachedTokens: 8, estimatedCostUsd: 0, source: "WORKER_REPORTED" });
+    assert.deepEqual({ ...response.usage, durationMs: undefined }, { inputTokens: 40, outputTokens: 12, cachedTokens: 8, estimatedCostUsd: 0, durationMs: undefined, source: "WORKER_REPORTED" });
+    assert.equal(typeof response.usage.durationMs, "number");
+    assert.equal(response.usage.durationMs! >= 0, true);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
@@ -557,4 +582,53 @@ test("compare, SARIF, and resume artifacts preserve audit state", async () => {
   const plan = buildResumePlan(before.run);
   assert.equal(plan.pendingObligations.length, 1);
   assert.equal(plan.findingsToValidate.length, 1);
+});
+
+test("revalidation keeps a disappeared verified finding actionable", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-revalidation-"));
+  await initWorkspace(root);
+  await writeFile(path.join(root, "app.ts"), "export function run(req) { return eval(req.body.code); }\n", "utf8");
+  const before = await runAudit(root, { output: path.join(root, "before") });
+  const verified = applyValidationResult(before.run, {
+    schemaVersion: 1,
+    validator: "independent-validator",
+    requestId: "revalidation-before",
+    runId: before.run.runId,
+    findingId: before.run.findings[0].id,
+    outcome: "VERIFIED",
+    baseTreeDigest: before.run.snapshot.treeDigest,
+    sourceFiles: before.run.files,
+    sandbox: { profile: "READ_ONLY_NO_NETWORK", readOnlySource: true, network: "DENY" },
+    reproducer: { command: "reproduce", exitCode: 0, timedOut: false, passed: true, stdoutDigest: "a", stderrDigest: "b" },
+    negativeControl: { command: "negative", exitCode: 1, timedOut: false, passed: true, stdoutDigest: "c", stderrDigest: "d" },
+  });
+  await writeFile(path.join(root, "app.ts"), "export const safe = true;\n", "utf8");
+  const after = await runAudit(root, { output: path.join(root, "after"), baseline: before.run });
+  const plan = buildRevalidationPlan(verified.run, after.run);
+  assert.equal(plan.status, "ACTION_REQUIRED");
+  assert.equal(plan.items.some((item) => item.lifecycle === "UNKNOWN" && item.action === "REVALIDATE"), true);
+  assert.equal(plan.requiredFindingIds.includes(before.run.findings[0].id), true);
+});
+
+test("benchmark acceptance gate is explicit about metric regressions", () => {
+  const report = {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    split: "development",
+    cases: [],
+    metrics: {
+      cases: 2,
+      expectedVulnerable: 1,
+      candidateRecall: 1,
+      candidatePrecision: 0.5,
+      falsePositiveRate: 0.5,
+      matchingCandidateRecall: 1,
+      unknownCoverageRate: 1,
+      tokensPerCase: 0,
+      durationMsPerCase: 10,
+    },
+    notes: [],
+  } satisfies BenchmarkReport;
+  assert.equal(evaluateBenchmark(report, { minCandidateRecall: 1, minCandidatePrecision: 0.9, maxFalsePositiveRate: 0 }).accepted, false);
+  assert.equal(evaluateBenchmark(report, { minCandidateRecall: 1, minCandidatePrecision: 0.5, maxFalsePositiveRate: 0.5 }).accepted, true);
 });

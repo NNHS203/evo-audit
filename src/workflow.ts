@@ -547,8 +547,9 @@ export function buildAuditPlan(run: AuditRun, tokenBudget = 12_000): AuditPlan {
   }
 
   const budget = Math.max(0, Math.floor(tokenBudget));
-  let remaining = budget;
-  let allocatedTokens = 0;
+  const consumedTokens = Math.max(0, Math.floor((run.tokenAccounting?.inputTokens ?? 0) + (run.tokenAccounting?.outputTokens ?? 0)));
+  let remaining = Math.max(0, budget - consumedTokens);
+  let allocatedTokens = consumedTokens;
   for (const task of tasks.filter((candidate) => ["INVESTIGATE", "HUNT"].includes(candidate.phase) && candidate.status === "PENDING")) {
     const finding = task.findingId ? run.findings.find((candidate) => candidate.id === task.findingId) : undefined;
     const rule = task.ruleId ? run.recon?.ruleInventory.find((candidate) => candidate.id === task.ruleId) : undefined;
@@ -580,6 +581,7 @@ export function buildAuditPlan(run: AuditRun, tokenBudget = 12_000): AuditPlan {
     tasks,
     notes: [
       "Token allocation applies to model investigation tasks; validator resource limits are tracked by the validation contract.",
+      `Global worker budget accounts for ${consumedTokens} tokens already consumed by this run before allocating pending tasks.`,
       "HUNT tasks use a smaller exploratory budget; INVESTIGATE tasks receive more context only after a concrete candidate exists.",
       "A WAITING validation task is not evidence of safety; it has not run yet.",
       "If context is insufficient, expand along graph edges before sending the entire repository to a worker.",

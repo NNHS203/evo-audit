@@ -262,6 +262,7 @@ export function mergeWorkerResult(runInput: AuditRun, result: AuditWorkerResult)
       outputTokens: run.tokenAccounting.outputTokens + nonNegativeNumber(reported.outputTokens, 0),
       cachedTokens: run.tokenAccounting.cachedTokens + nonNegativeNumber(reported.cachedTokens, 0),
       estimatedCostUsd: run.tokenAccounting.estimatedCostUsd + nonNegativeNumber(reported.estimatedCostUsd, 0),
+      durationMs: (run.tokenAccounting.durationMs ?? 0) + nonNegativeNumber(reported.durationMs, 0),
       source: "WORKER_REPORTED",
     };
   }
@@ -269,7 +270,7 @@ export function mergeWorkerResult(runInput: AuditRun, result: AuditWorkerResult)
   if (result.receiptId) {
     run.workerReceipts = [
       ...(run.workerReceipts ?? []),
-      { receiptId: result.receiptId, worker: result.worker, taskId: result.taskId, usage: reported ? { inputTokens: nonNegativeNumber(reported.inputTokens, 0), outputTokens: nonNegativeNumber(reported.outputTokens, 0), cachedTokens: nonNegativeNumber(reported.cachedTokens, 0), estimatedCostUsd: nonNegativeNumber(reported.estimatedCostUsd, 0), source: "WORKER_REPORTED" } : undefined, appliedAt: new Date().toISOString() },
+      { receiptId: result.receiptId, worker: result.worker, taskId: result.taskId, usage: reported ? { inputTokens: nonNegativeNumber(reported.inputTokens, 0), outputTokens: nonNegativeNumber(reported.outputTokens, 0), cachedTokens: nonNegativeNumber(reported.cachedTokens, 0), estimatedCostUsd: nonNegativeNumber(reported.estimatedCostUsd, 0), durationMs: nonNegativeNumber(reported.durationMs, 0), source: "WORKER_REPORTED" } : undefined, appliedAt: new Date().toISOString() },
     ];
   }
 
@@ -287,7 +288,7 @@ export function mergeWorkerResult(runInput: AuditRun, result: AuditWorkerResult)
         run.notes = uniqueStrings([...run.notes, `Worker ${result.worker} failed task ${result.taskId}: ${result.error}`]);
       } else {
         const reportedTokens = nonNegativeNumber(reported?.inputTokens, 0) + nonNegativeNumber(reported?.outputTokens, 0);
-        if (task.budgetTokens > 0 && reportedTokens > task.budgetTokens) {
+        if (reportedTokens > task.budgetTokens) {
           task.status = "BLOCKED";
           run.notes = uniqueStrings([...run.notes, `Worker ${result.worker} exceeded task budget: ${reportedTokens} > ${task.budgetTokens} tokens.`]);
         } else {

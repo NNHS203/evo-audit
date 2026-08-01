@@ -5,7 +5,7 @@ import path from "node:path";
 import { defaultConfig, defaultPlaybook } from "./playbook.js";
 import { detectFindings } from "./detectors.js";
 import { buildCodeGraph, detectGraphFindings } from "./graph.js";
-import { formatTokenUsage, recordSessionUsage, tokenUsageTotals } from "./usage.js";
+import { formatLatency, formatTokenUsage, recordSessionUsage, tokenUsageTotals } from "./usage.js";
 import { defaultModelConfig } from "./models.js";
 import { defaultThreatModelOverrides, renderThreatModel } from "./threat.js";
 import { buildAuditPlan, buildAuditRecon, planSummary } from "./workflow.js";
@@ -250,9 +250,13 @@ export function summarizeRun(run: AuditRun, options: { findingIds?: string[]; se
       ? `Coverage: semantic=${run.coverage.semantic}  cells=${run.recon.coverageMatrix.cells.length}  hunt=${run.recon.coverageMatrix.cells.filter((cell) => cell.status === "HUNT_REQUIRED").length}  unknown=${run.recon.coverageMatrix.cells.filter((cell) => cell.status === "UNKNOWN").length}  validated=${run.recon.coverageMatrix.cells.filter((cell) => cell.status === "VALIDATED").length}`
       : `Coverage: semantic=${run.coverage.semantic}  matrix=unavailable`,
     `Tokens: current ${formatTokenUsage(tokenUsageTotals(run.tokenAccounting))} (source=${run.tokenAccounting.source})`,
+    `Latency: current=${formatLatency(tokenUsageTotals(run.tokenAccounting).durationMs)}`,
     planSummary(run.plan),
   ];
-  if (options.session) lines.push(`Session total: ${formatTokenUsage(options.session.total)} across ${options.session.runs.length} run(s) (session=${options.session.sessionId})`);
+  if (options.session) {
+    lines.push(`Session total: ${formatTokenUsage(options.session.total)} across ${options.session.runs.length} run(s) (session=${options.session.sessionId})`);
+    lines.push(`Session latency: ${formatLatency(options.session.total.durationMs)}`);
+  }
   for (const finding of visibleFindings) {
     const location = finding.locations[0];
     const locationText = location ? `${location.file}:${location.line}` : "<unmapped>";
