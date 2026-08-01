@@ -183,7 +183,7 @@ export interface ModuleGraphEdge {
 
 export interface AuditRecon {
   schemaVersion: 1;
-  projectKind: "NODE_TYPESCRIPT" | "NODE_JAVASCRIPT" | "UNKNOWN";
+  projectKind: "NODE_TYPESCRIPT" | "NODE_JAVASCRIPT" | "PYTHON" | "MIXED" | "UNKNOWN";
   ruleInventory: Array<{ id: string; title: string; severity: Severity; evidenceRequired: EvidenceTier }>;
   manifests: string[];
   scripts: Record<string, string>;

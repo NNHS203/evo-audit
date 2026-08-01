@@ -7,6 +7,7 @@ export interface GroundTruthLabel {
   startLine: number;
   endLine?: number;
   ruleIds?: string[];
+  alternateLocations?: Array<{ file: string; startLine: number; endLine?: number }>;
 }
 
 export interface ScannerLocation {
@@ -19,6 +20,7 @@ export interface NormalizedScannerFinding {
   id: string;
   scanner: string;
   ruleId: string;
+  ruleIds?: string[];
   locations: ScannerLocation[];
   reportable: boolean;
   unsupportedClaim: boolean;
@@ -87,7 +89,19 @@ export function groundTruthLabelsFromValue(value: unknown, format: GroundTruthFo
       if (!entry || typeof entry.id !== "string" || typeof entry.is_vulnerable !== "boolean" || !file || startLine === undefined) throw new Error(`Invalid RealVuln ground-truth entry at index ${index}.`);
       const endLine = typeof location?.end_line === "number" ? location.end_line : typeof entry.end_line === "number" ? entry.end_line : undefined;
       const ruleIds = [entry.primary_cwe, ...(stringArray(entry.acceptable_cwes) ?? [])].filter((item): item is string => typeof item === "string" && item.length > 0);
-      return { id: entry.id, vulnerable: entry.is_vulnerable, file, startLine, endLine, ruleIds: ruleIds.length > 0 ? [...new Set(ruleIds)] : undefined };
+      const alternateLocations: Array<{ file: string; startLine: number; endLine?: number }> = [];
+      if (Array.isArray(entry.acceptable_locations)) {
+        for (const candidate of entry.acceptable_locations) {
+          const alternative = recordValue(candidate);
+          const alternativeLocation = alternative ? recordValue(alternative.location) : null;
+          const alternativeFile = typeof alternative?.file === "string" ? alternative.file : undefined;
+          const alternativeStart = typeof alternativeLocation?.start_line === "number" ? alternativeLocation.start_line : typeof alternative?.start_line === "number" ? alternative.start_line : undefined;
+          const alternativeEnd = typeof alternativeLocation?.end_line === "number" ? alternativeLocation.end_line : typeof alternative?.end_line === "number" ? alternative.end_line : undefined;
+          if (alternativeFile && alternativeStart !== undefined) alternateLocations.push({ file: alternativeFile, startLine: alternativeStart, ...(alternativeEnd === undefined ? {} : { endLine: alternativeEnd }) });
+        }
+      }
+      const label = { id: entry.id, vulnerable: entry.is_vulnerable, file, startLine, endLine, ruleIds: ruleIds.length > 0 ? [...new Set(ruleIds)] : undefined };
+      return alternateLocations.length > 0 ? { ...label, alternateLocations } : label;
     });
   }
   const raw = Array.isArray(value) ? value : Array.isArray(root?.labels) ? root.labels : null;
@@ -122,18 +136,24 @@ function f3(precision: number, recall: number): number {
 }
 
 function locationMatches(finding: NormalizedScannerFinding, label: GroundTruthLabel, lineTolerance: number): boolean {
-  const expectedStart = Math.max(1, Math.floor(label.startLine));
-  const expectedEnd = Math.max(expectedStart, Math.floor(label.endLine ?? label.startLine));
-  return finding.locations.some((location) => {
-    if (normalizedFile(location.file) !== normalizedFile(label.file)) return false;
-    const actualStart = Math.max(1, Math.floor(location.startLine));
-    const actualEnd = Math.max(actualStart, Math.floor(location.endLine));
-    return actualStart <= expectedEnd + lineTolerance && actualEnd >= expectedStart - lineTolerance;
+  const expectedLocations = [{ file: label.file, startLine: label.startLine, endLine: label.endLine }, ...(label.alternateLocations ?? [])];
+  return expectedLocations.some((expected) => {
+    const expectedStart = Math.max(1, Math.floor(expected.startLine));
+    const expectedEnd = Math.max(expectedStart, Math.floor(expected.endLine ?? expected.startLine));
+    return finding.locations.some((location) => {
+      if (normalizedFile(location.file) !== normalizedFile(expected.file)) return false;
+      const actualStart = Math.max(1, Math.floor(location.startLine));
+      const actualEnd = Math.max(actualStart, Math.floor(location.endLine));
+      return actualStart <= expectedEnd + lineTolerance && actualEnd >= expectedStart - lineTolerance;
+    });
   });
 }
 
 function matches(finding: NormalizedScannerFinding, label: GroundTruthLabel, lineTolerance: number): boolean {
-  if (label.ruleIds && label.ruleIds.length > 0 && !label.ruleIds.includes(finding.ruleId)) return false;
+  if (label.ruleIds && label.ruleIds.length > 0) {
+    const findingRuleIds = new Set([finding.ruleId, ...(finding.ruleIds ?? [])]);
+    if (!label.ruleIds.some((ruleId) => findingRuleIds.has(ruleId))) return false;
+  }
   return locationMatches(finding, label, lineTolerance);
 }
 
@@ -231,12 +251,23 @@ function firstLocation(finding: Finding): ScannerLocation[] {
   return finding.locations.map((location) => ({ file: location.file, startLine: location.line, endLine: location.endLine }));
 }
 
+function ruleAliases(ruleId: string): string[] {
+  if (ruleId.includes("COMMAND-INJECTION")) return ["CWE-78"];
+  if (ruleId.includes("DYNAMIC-CODE")) return ["CWE-95"];
+  if (ruleId.includes("SQL-INJECTION")) return ["CWE-89"];
+  if (ruleId.includes("OPEN-REDIRECT")) return ["CWE-601"];
+  if (ruleId.includes("SSRF")) return ["CWE-918"];
+  if (ruleId.includes("SSTI")) return ["CWE-1336"];
+  return [];
+}
+
 export function scannerFindingsFromRun(run: AuditRun, scanner = "evo-audit"): NormalizedScannerFinding[] {
   const reportableIds = new Set(run.reportableFindingIds ?? []);
   return run.findings.map((finding) => ({
     id: finding.id,
     scanner,
     ruleId: finding.ruleId,
+    ruleIds: [finding.ruleId, ...ruleAliases(finding.ruleId)],
     locations: firstLocation(finding),
     reportable: reportableIds.has(finding.id) && finding.status === "VERIFIED" && finding.evidenceTier === "T2_REPRODUCIBLE",
     unsupportedClaim: finding.status === "VERIFIED" && !(reportableIds.has(finding.id) && finding.evidenceTier === "T2_REPRODUCIBLE"),
@@ -286,6 +317,7 @@ export function scannerFindingsFromSarif(value: unknown, scanner = "sarif-scanne
         id: stringValue(item.id) ?? stringValue(objectRecord(item.fingerprints)?.primaryLocationLineHash) ?? `${scanner}:${index}`,
         scanner: toolName ?? scanner,
         ruleId: stringValue(item.ruleId) ?? "UNKNOWN-RULE",
+        ruleIds: stringArray(properties?.cwe),
         locations,
         reportable,
         unsupportedClaim: properties?.status === "VERIFIED" && !reportable,

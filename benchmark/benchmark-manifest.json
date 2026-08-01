@@ -37,6 +37,24 @@
       "caseId": "js-dynamic-validation-001",
       "split": "development",
       "sha256": "02637f809fd2078be95f3af0592c503b6e37e1041a378f0c88e57f4293f2e8f7"
+    },
+    {
+      "file": "cases/python-command-injection.json",
+      "caseId": "python-command-injection-001",
+      "split": "development",
+      "sha256": "cf18178186dced43bde5919017469d63c981e9f9899b681392cc790e00a55f83"
+    },
+    {
+      "file": "cases/python-command-safe-001.json",
+      "caseId": "python-command-safe-001",
+      "split": "development",
+      "sha256": "fc9acb3bf5b67cca8774f84158e0a29c05e54c478f2acc25c8bdc034dc2ecddc"
+    },
+    {
+      "file": "cases/python-sql-interprocedural-001.json",
+      "caseId": "python-sql-interprocedural-001",
+      "split": "development",
+      "sha256": "9418420d78a0b14bb20a0f57a68253a563e0e2f8f8c2534b34cdba064e1286a5"
     }
   ],
   "notes": [

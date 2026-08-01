@@ -14,7 +14,8 @@
     ".js",
     ".jsx",
     ".mjs",
-    ".cjs"
+    ".cjs",
+    ".py"
   ],
   "playbook": "audit.playbook.json",
   "tokenBudget": 12000

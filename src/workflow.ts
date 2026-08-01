@@ -28,6 +28,8 @@ const importPatterns = [
   /\bexport\s+(?:[\s\S]*?\sfrom\s*)["']([^"']+)["']/g,
   /\brequire\s*\(\s*["']([^"']+)["']\s*\)/g,
   /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g,
+  /^\s*from\s+(\.[A-Za-z0-9_\.]*)\s+import\s+/gm,
+  /^\s*import\s+(\.[A-Za-z0-9_\.]*)/gm,
 ];
 
 const manifestNames = [
@@ -37,6 +39,12 @@ const manifestNames = [
   "yarn.lock",
   "bun.lockb",
   "tsconfig.json",
+  "pyproject.toml",
+  "requirements.txt",
+  "Pipfile",
+  "poetry.lock",
+  "setup.py",
+  "manage.py",
   "Dockerfile",
   "docker-compose.yml",
   "docker-compose.yaml",
@@ -426,7 +434,8 @@ export async function buildAuditRecon(
   ]).filter((file) => files.some((candidate) => candidate.path === file)).sort().slice(0, 96);
   const hasTypeScript = files.some((file) => [".ts", ".tsx"].includes(extensionWithoutDot(file.path)));
   const hasJavaScript = files.some((file) => [".js", ".jsx", ".mjs", ".cjs"].includes(extensionWithoutDot(file.path)));
-  const projectKind = hasTypeScript ? "NODE_TYPESCRIPT" : hasJavaScript ? "NODE_JAVASCRIPT" : "UNKNOWN";
+  const hasPython = files.some((file) => extensionWithoutDot(file.path) === ".py");
+  const projectKind = hasPython && (hasTypeScript || hasJavaScript) ? "MIXED" : hasPython ? "PYTHON" : hasTypeScript ? "NODE_TYPESCRIPT" : hasJavaScript ? "NODE_JAVASCRIPT" : "UNKNOWN";
   const ruleInventory = playbook.rules.filter((rule) => rule.enabled).map(({ id, title, severity, evidenceRequired }) => ({ id, title, severity, evidenceRequired }));
   const contextDigest = stableDigest({ manifests, scripts, entries, surface, graph, codeGraph: codeGraph.digest, coverageMatrix: coverageMatrix.digest, threatModel: threatModel.digest, focusFiles, ruleInventory });
 

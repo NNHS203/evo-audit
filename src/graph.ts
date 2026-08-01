@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import ts from "typescript";
+import { buildPythonGraph } from "./python-graph.js";
 import type {
   AuditObligation,
   AuditPlaybook,
@@ -129,6 +130,10 @@ function scriptKind(file: string): ts.ScriptKind {
     case ".cjs": return ts.ScriptKind.JS;
     default: return ts.ScriptKind.TS;
   }
+}
+
+function isPythonFile(file: string): boolean {
+  return file.toLowerCase().endsWith(".py");
 }
 
 function position(sourceFile: ts.SourceFile, node: ts.Node): Pick<CodeGraphNode, "line" | "column" | "endLine"> {
@@ -289,6 +294,7 @@ function buildFileGraph(builder: GraphBuilder, files: FileFingerprint[], content
 }
 
 function analyzeFile(builder: GraphBuilder, file: FileFingerprint, content: string): void {
+  if (isPythonFile(file.path)) return;
   const sourceFile = ts.createSourceFile(file.path, content, ts.ScriptTarget.Latest, true, scriptKind(file.path));
   const fileNodeId = builder.fileNodes.get(file.path) ?? `file:${stableId([file.path])}`;
   const rootScope: Scope = { functionNodeId: fileNodeId, tainted: new Map(), controls: [] };
@@ -389,6 +395,7 @@ function analyzeInterprocedural(builder: GraphBuilder, files: FileFingerprint[],
   const calls: CallSite[] = [];
   const fileSet = new Set(files.map((file) => file.path));
   for (const file of files) {
+    if (isPythonFile(file.path)) continue;
     const sourceFile = ts.createSourceFile(file.path, contents.get(file.path) ?? "", ts.ScriptTarget.Latest, true, scriptKind(file.path));
     const fileNodeId = builder.fileNodes.get(file.path) ?? `file:${stableId([file.path])}`;
     const imports = importedBindings(sourceFile, file.path, fileSet);
@@ -529,6 +536,19 @@ export function buildCodeGraph(files: FileFingerprint[], contents: Map<string, s
   buildFileGraph(builder, files, contents, includeExtensions);
   for (const file of files) analyzeFile(builder, file, contents.get(file.path) ?? "");
   analyzeInterprocedural(builder, files, contents);
+  const python = buildPythonGraph(files.filter((file) => includeExtensions.includes(path.extname(file.path).toLowerCase())), contents);
+  for (const node of python.nodes) {
+    if (!builder.nodeKeys.has(`${node.file}:${node.line}:${node.column}:${node.kind}:${node.name}`)) {
+      builder.nodes.push(node);
+      builder.nodeKeys.set(`${node.file}:${node.line}:${node.column}:${node.kind}:${node.name}`, node.id);
+    }
+  }
+  for (const edge of python.edges) addEdge(builder, edge);
+  for (const flow of python.flows) {
+    if (builder.flowKeys.has(`${flow.sourceNodeId}\0${flow.sinkNodeId}`)) continue;
+    builder.flowKeys.add(`${flow.sourceNodeId}\0${flow.sinkNodeId}`);
+    builder.flows.push(flow);
+  }
   builder.nodes.sort((left, right) => left.id.localeCompare(right.id));
   builder.edges.sort((left, right) => `${left.from}\0${left.to}\0${left.kind}\0${left.label ?? ""}`.localeCompare(`${right.from}\0${right.to}\0${right.kind}\0${right.label ?? ""}`));
   builder.flows.sort((left, right) => left.id.localeCompare(right.id));
@@ -551,10 +571,12 @@ function locationFor(node: CodeGraphNode): SourceLocation {
   return { file: node.file, line: node.line, column: node.column, endLine: node.endLine, snippet: node.snippet };
 }
 
-function ruleForSink(playbook: AuditPlaybook, kind: string): PlaybookRule | undefined {
-  const suffix = kind === "DYNAMIC_CODE" ? "DYNAMIC-CODE" : kind === "COMMAND_EXECUTION" ? "COMMAND-INJECTION" : kind === "QUERY_EXECUTION" ? "SQL-INJECTION" : kind === "REDIRECT" ? "OPEN-REDIRECT" : undefined;
+function ruleForSink(playbook: AuditPlaybook, kind: string, file: string): PlaybookRule | undefined {
+  const suffix = kind === "DYNAMIC_CODE" ? "DYNAMIC-CODE" : kind === "COMMAND_EXECUTION" ? "COMMAND-INJECTION" : kind === "QUERY_EXECUTION" ? "SQL-INJECTION" : kind === "REDIRECT" ? "OPEN-REDIRECT" : kind === "SSTI" ? "SSTI" : kind === "OUTBOUND_REQUEST" ? "SSRF" : undefined;
   if (!suffix) return undefined;
-  return playbook.rules.find((rule) => rule.enabled && rule.id.includes(suffix));
+  const extension = file.slice(file.lastIndexOf(".")).toLowerCase();
+  return playbook.rules.find((rule) => rule.enabled && rule.id.includes(suffix) && rule.globs.some((glob) => glob.endsWith(extension)))
+    ?? playbook.rules.find((rule) => rule.enabled && rule.id.includes(suffix));
 }
 
 function findingText(kind: string): Pick<Finding, "rootCause" | "impact" | "remediation"> {
@@ -572,6 +594,16 @@ function findingText(kind: string): Pick<Finding, "rootCause" | "impact" | "reme
     rootCause: "An AST-traced boundary input reaches a query execution sink through a local data-flow path.",
     impact: "An attacker may alter query semantics if the driver does not parameterize the traced value.",
     remediation: "Use parameterized query APIs and add a test proving metacharacters remain data.",
+  };
+  if (kind === "SSTI") return {
+    rootCause: "An AST-traced boundary input reaches a server-side template rendering sink.",
+    impact: "An attacker may execute template expressions or access server-side objects if the template source is controllable.",
+    remediation: "Render trusted templates by name, never concatenate user input into template source, and add a negative test for template expressions.",
+  };
+  if (kind === "OUTBOUND_REQUEST") return {
+    rootCause: "An AST-traced boundary input reaches an outbound request sink.",
+    impact: "An attacker may cause server-side requests to internal or restricted destinations if URL policy is incomplete.",
+    remediation: "Use an allowlist of schemes, hosts, ports, and resolved IP ranges, then verify redirects and DNS rebinding are rejected.",
   };
   return {
     rootCause: "An AST-traced boundary input reaches an outbound redirect sink.",
@@ -594,7 +626,7 @@ export function detectGraphFindings(
     const sink = nodes.get(flow.sinkNodeId);
     if (!source || !sink) continue;
     const kind = sink.detail;
-    const rule = ruleForSink(playbook, kind);
+    const rule = ruleForSink(playbook, kind, sink.file);
     if (!rule) continue;
     const duplicate = [...existing, ...findings].some((finding) => finding.ruleId === rule.id && finding.locations.some((location) => location.file === sink.file && location.line === sink.line));
     if (duplicate) continue;

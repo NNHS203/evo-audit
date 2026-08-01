@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "caseId": "python-sql-interprocedural-001",
+  "split": "development",
+  "language": "python",
+  "file": "app.py",
+  "code": "from flask import request\n\ndef run_query(value):\n    cursor.execute(value)\n\ndef route():\n    query = request.args.get('query')\n    return run_query(query)\n",
+  "property": "A request argument reaches a query sink through a helper function.",
+  "expected": {
+    "vulnerable": true,
+    "ruleId": "PY-SQL-INJECTION-001",
+    "minimumReportableEvidence": "T2_REPRODUCIBLE"
+  },
+  "notes": [
+    "Exercises bounded Python helper summaries rather than whole-repository prompting."
+  ]
+}

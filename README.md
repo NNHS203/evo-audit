@@ -70,6 +70,10 @@ evo-audit score ./ground-truth.json ./external.sarif --format sarif
 evo-audit score ./realvuln-ground-truth.json ./external.sarif \
   --format sarif --ground-truth-format realvuln
 
+# Reproduce one pinned RealVuln v2.0 repository after cloning its benchmark.
+evo-audit realvuln ./Real-Vuln-Benchmark \
+  realvuln-damn-vulnerable-flask-application --output ./realvuln-runs
+
 # Inspect the prioritized investigation and validation queue.
 evo-audit plan ./audit-runs/<run>/run.json
 
@@ -125,10 +129,11 @@ Workers should consume one plan task at a time:
 `STATIC_ONLY`, `PARTIAL_WORKER`, and `VALIDATED` describe semantic coverage;
 `PENDING`, `WAITING`, and `DEFERRED` are workflow states, not security
 verdicts. A deferred task means the worker budget was exhausted; it does not
-mean the code was reviewed or safe. Recon now also contains a TypeScript/
-JavaScript AST graph with local source/sink flow facts. Those facts improve
-candidate discovery and context selection but remain possible paths until an
-independent validator proves reachability and impact.
+mean the code was reviewed or safe. Recon contains TypeScript/JavaScript AST
+facts and a bounded Python source/sink graph with local assignment and helper
+summaries. Those facts improve candidate discovery and context selection but
+remain possible paths until an independent validator proves reachability and
+impact.
 
 ## Evidence contract
 

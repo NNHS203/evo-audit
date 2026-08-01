@@ -13,6 +13,7 @@ import { executeWorkerTask } from "./worker-runner.js";
 import { evaluateBenchmark, runBenchmark } from "./benchmark.js";
 import { buildRevalidationPlan } from "./revalidation.js";
 import { groundTruthLabelsFromValue, scannerFindingsFromRun, scannerFindingsFromSarif, scoreScannerFindings, type GroundTruthFormat } from "./scoring.js";
+import { runRealVuln } from "./realvuln.js";
 import type { AuditRun, AuditWorkerResult, ValidationResult } from "./types.js";
 
 function usage(): string {
@@ -39,6 +40,7 @@ Commands:
   worker <run.json> <task-id>         Run one HUNT/INVESTIGATE task with a configured model
   worker <run.json> --all             Run pending worker tasks with bounded concurrency
   benchmark <cases-dir>               Run benchmark cases (optional --model auto)
+  realvuln <benchmark-root> <repo-id>  Clone a pinned RealVuln repo and emit a scored report
   evolve <run.json> [--output FILE]   Propose playbook improvements from audit gaps
   report <run.json> [--format FORMAT] Print text, json, or sarif
 
@@ -108,6 +110,22 @@ async function main(): Promise<void> {
       }
     }
     if (!acceptance.accepted) throw new Error(`Benchmark acceptance failed: ${acceptance.failures.join("; ")}`);
+    return;
+  }
+
+  if (command === "realvuln") {
+    if (!input || !secondInput) throw new Error("realvuln requires the RealVuln checkout root and repo-id");
+    const report = await runRealVuln(path.resolve(cwd, input), secondInput, {
+      output: path.resolve(cwd, valueFlag(args, "--output", "realvuln-runs")),
+      keepCheckout: flag(args, "--keep-checkout"),
+    });
+    if (flag(args, "--json")) console.log(JSON.stringify(report, null, 2));
+    else {
+      console.log(`RealVuln ${report.repository.id}@${report.repository.commit}`);
+      console.log(`Candidate F3=${report.score.candidate.f3.toFixed(3)} precision=${report.score.candidate.precision.toFixed(3)} recall=${report.score.candidate.recall.toFixed(3)} false-positive-rate=${report.score.candidate.falsePositiveRate.toFixed(3)}`);
+      console.log(`Reportable F3=${report.score.reportable.f3.toFixed(3)} precision=${report.score.reportable.precision.toFixed(3)} recall=${report.score.reportable.recall.toFixed(3)} findings=${report.score.findings}`);
+      console.log(`Report: ${path.join(path.resolve(cwd, valueFlag(args, "--output", "realvuln-runs")), "realvuln-report.json")}`);
+    }
     return;
   }
 

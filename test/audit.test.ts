@@ -710,6 +710,9 @@ test("scanner scoring separates candidate and evidence-gated reportable performa
   assert.equal(score.reportable.tokensPerValidatedFinding, 120);
   const realVulnLabels = groundTruthLabelsFromValue({ findings: [{ id: "rv-1", is_vulnerable: true, file: "src/app.ts", location: { start_line: 10, end_line: 12 }, primary_cwe: "CWE-79", acceptable_cwes: ["CWE-79", "CWE-80"] }] }, "REALVULN");
   assert.deepEqual(realVulnLabels[0], { id: "rv-1", vulnerable: true, file: "src/app.ts", startLine: 10, endLine: 12, ruleIds: ["CWE-79", "CWE-80"] });
+  const alternateLocation = groundTruthLabelsFromValue({ findings: [{ id: "rv-2", is_vulnerable: true, file: "src/app.ts", location: { start_line: 10 }, acceptable_locations: [{ file: "src/model.ts", start_line: 26, end_line: 30 }] }] }, "REALVULN");
+  const alternateFinding = scannerFindingsFromSarif({ version: "2.1.0", runs: [{ results: [{ ruleId: "RULE-2", locations: [{ physicalLocation: { artifactLocation: { uri: "src/model.ts" }, region: { startLine: 27 } } }], properties: { reportable: true } }] }] });
+  assert.equal(scoreScannerFindings(alternateFinding, alternateLocation).candidate.truePositive, 1);
 });
 
 test("benchmark runner can audit a pinned-style local checkout source", async () => {
@@ -736,4 +739,28 @@ test("benchmark runner can audit a pinned-style local checkout source", async ()
   assert.equal(report.cases[0].sourceKind, "CHECKOUT");
   assert.equal(report.cases[0].sourceTreeDigest.length, 64);
   assert.equal(report.cases[0].candidateFound, true);
+});
+
+test("Python graph tracks local assignments and helper summaries without flagging fixed commands", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-python-graph-"));
+  await initWorkspace(root);
+  await writeFile(path.join(root, "app.py"), [
+    "from flask import request",
+    "import subprocess",
+    "",
+    "def run(value):",
+    "    return subprocess.run(value, shell=True)",
+    "",
+    "def route():",
+    "    command = request.args.get('command')",
+    "    return run(command)",
+    "",
+    "def safe():",
+    "    return subprocess.run(['echo', 'fixed'], check=True)",
+  ].join("\n"), "utf8");
+  const result = await runAudit(root, { output: path.join(root, "runs") });
+  assert.equal(result.run.recon?.projectKind, "PYTHON");
+  assert.equal(result.run.recon?.codeGraph?.flows.some((flow) => flow.reason.includes("Python helper")), true);
+  assert.equal(result.run.findings.some((finding) => finding.ruleId === "PY-COMMAND-INJECTION-001"), true);
+  assert.equal(result.run.findings.some((finding) => finding.locations.some((location) => location.line === 11)), false);
 });

@@ -52,6 +52,11 @@ evo-audit benchmark ./benchmark/cases --split development \
 # Optional: run case-declared reproducers in Docker/Podman isolation.
 evo-audit benchmark ./benchmark/cases --split development \
   --validate
+
+# External reproducibility track; RealVuln is intentionally not vendored.
+git clone --depth 1 https://github.com/kolega-ai/Real-Vuln-Benchmark.git ./Real-Vuln-Benchmark
+evo-audit realvuln ./Real-Vuln-Benchmark \
+  realvuln-damn-vulnerable-flask-application --output ./realvuln-runs
 ```
 
 The runner creates an isolated temporary workspace for each case, records the
@@ -87,3 +92,10 @@ result.
 `benchmark/benchmark-manifest.json` pins every checked-in case by SHA-256,
 split, and case ID. Passing `--manifest` makes accidental case drift fail
 closed before metrics are computed.
+
+`realvuln` reads the upstream manifest, clones the selected repository at its
+full commit SHA, verifies the checkout before auditing, and writes
+`realvuln-report.json` with the ground-truth hash, tree digest, audit artifact
+path, candidate score, and evidence-gated reportable score. A failed clone or
+revision mismatch is an error; it is never silently scored as a clean
+repository.

@@ -5,6 +5,7 @@ import type {
   PlaybookRule,
   SourceLocation,
 } from "./types.js";
+import { maskPython } from "./python-graph.js";
 
 interface DetectorMatch {
   rule: PlaybookRule;
@@ -20,6 +21,9 @@ interface DetectorMatch {
 
 const requestInput =
   "(?:req(?:uest)?\\s*\\.\\s*(?:body|query|params|headers)|userInput|user_input|untrusted|input)";
+
+const pythonRequestInput =
+  "(?:request|req)\\s*\\.\\s*(?:args|form|values|json|headers|cookies|files|GET|POST|META|COOKIES|FILES|data|body|query_params|path_params)|user_input|raw_input|untrusted|input\\s*\\(|os\\s*\\.\\s*environ|sys\\s*\\.\\s*argv";
 
 /**
  * Keep source locations stable while removing text that is not executable code.
@@ -110,6 +114,66 @@ function matchesRule(rule: PlaybookRule, relativePath: string): boolean {
 }
 
 function findMatch(rule: PlaybookRule, line: string): Omit<DetectorMatch, "rule" | "line" | "column" | "snippet"> | null {
+  if (rule.id === "PY-DYNAMIC-CODE-001" && /\b(?:eval|exec)\s*\(/.test(line) && new RegExp(pythonRequestInput, "i").test(line)) {
+    return {
+      rootCause: "A Python dynamic code execution boundary is present.",
+      impact: "If attacker-controlled data reaches this call, arbitrary Python code execution may be possible.",
+      remediation: "Remove eval/exec or constrain it to a reviewed, non-user-controlled allowlist and verify the boundary with an isolated test.",
+      kind: "DYNAMIC_CODE",
+      limitation: "This static pass does not prove that an external attacker controls the Python argument.",
+    };
+  }
+
+  if (rule.id === "PY-COMMAND-INJECTION-001" && /\b(?:os\s*\.\s*(?:system|popen)|subprocess\s*\.\s*(?:run|Popen|call|check_call|check_output))\s*\(/.test(line) && new RegExp(pythonRequestInput, "i").test(line)) {
+    return {
+      rootCause: "Request or user input appears in a Python command execution call.",
+      impact: "An attacker may influence command execution if shell interpretation or argument construction is unsafe.",
+      remediation: "Prefer fixed commands and argument arrays, then add an isolated reproducer that proves metacharacters cannot change execution.",
+      kind: "SOURCE_TO_SINK",
+      limitation: "This pass does not resolve Python interprocedural reachability or shell configuration.",
+    };
+  }
+
+  if (rule.id === "PY-SQL-INJECTION-001" && /\b(?:execute|executemany|executescript)\s*\(/.test(line) && new RegExp(`${pythonRequestInput}|%s|\\+|f["']`, "i").test(line)) {
+    return {
+      rootCause: "A request-controlled or interpolated value appears in a Python query execution call.",
+      impact: "An attacker may alter query semantics if parameterization is not enforced.",
+      remediation: "Use parameterized query APIs and add a test proving metacharacters remain data.",
+      kind: "SOURCE_TO_SINK",
+      limitation: "This pass does not understand the database driver or parameter binding semantics.",
+    };
+  }
+
+  if (rule.id === "PY-SSTI-001" && /\b(?:render_template_string|jinja2\s*\.\s*(?:Template|Environment)|Template)\s*\(/.test(line) && new RegExp(pythonRequestInput, "i").test(line)) {
+    return {
+      rootCause: "A request-controlled value appears to reach a Python template source sink.",
+      impact: "An attacker may execute template expressions or access server-side objects.",
+      remediation: "Render trusted templates by name and keep user input as data, then verify template expressions are not evaluated.",
+      kind: "SOURCE_TO_SINK",
+      limitation: "This pass does not prove the template engine, sandbox, or actual expression reachability.",
+    };
+  }
+
+  if (rule.id === "PY-SSRF-001" && /\b(?:requests|httpx|urllib\s*\.\s*request|urlopen)\s*\.\s*(?:get|post|put|patch|request|urlopen)\s*\(/.test(line) && new RegExp(pythonRequestInput, "i").test(line)) {
+    return {
+      rootCause: "A request-controlled URL appears to reach a Python outbound request sink.",
+      impact: "An attacker may cause server-side requests to internal or restricted destinations.",
+      remediation: "Enforce scheme, host, port, resolved IP, redirect, and DNS-rebinding policy before making the request.",
+      kind: "SOURCE_TO_SINK",
+      limitation: "This pass does not prove URL normalization, DNS behavior, or redirect policy.",
+    };
+  }
+
+  if (rule.id === "PY-OPEN-REDIRECT-001" && /\b(?:redirect|flask\s*\.\s*redirect)\s*\(/.test(line) && new RegExp(pythonRequestInput, "i").test(line)) {
+    return {
+      rootCause: "A redirect target appears to use request-controlled data in Python.",
+      impact: "An attacker may redirect a user to an external destination if no same-origin or allowlist check exists.",
+      remediation: "Use same-origin defaults or an explicit destination allowlist and verify external destinations are rejected.",
+      kind: "SOURCE_TO_SINK",
+      limitation: "This pass does not resolve guards in middleware or helper functions.",
+    };
+  }
+
   if (
     rule.id === "JS-DYNAMIC-CODE-001" &&
     /\beval\s*\(|\bnew\s+Function\s*\(/.test(line) &&
@@ -178,7 +242,7 @@ export function detectFindings(
   const findings: Finding[] = [];
   const obligations: AuditObligation[] = [];
   const lines = content.split(/\r?\n/);
-  const codeLines = maskNonCode(content).split(/\r?\n/);
+  const codeLines = relativePath.toLowerCase().endsWith(".py") ? maskPython(content).split(/\r?\n/) : maskNonCode(content).split(/\r?\n/);
 
   for (const [index, line] of lines.entries()) {
     const codeLine = codeLines[index] ?? "";

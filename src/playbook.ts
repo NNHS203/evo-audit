@@ -3,7 +3,7 @@ import type { AuditPlaybook, AuditConfig, PlaybookRule } from "./types.js";
 export const defaultConfig: AuditConfig = {
   schemaVersion: 1,
   ignore: ["node_modules", ".git", "dist", "build", "coverage", "audit-runs"],
-  includeExtensions: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"],
+  includeExtensions: [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py"],
   playbook: "audit.playbook.json",
   tokenBudget: 12000,
 };
@@ -47,6 +47,66 @@ const defaultRules: PlaybookRule[] = [
     severity: "HIGH",
     evidenceRequired: "T2_REPRODUCIBLE",
     globs: ["**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx", "**/*.mjs", "**/*.cjs"],
+    enabled: true,
+  },
+  {
+    id: "PY-DYNAMIC-CODE-001",
+    title: "Dynamic code execution from a Python call site",
+    description:
+      "eval() and exec() create a Python code execution boundary. Reachability and input control must be verified before this can be reported as a vulnerability.",
+    severity: "CRITICAL",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.py"],
+    enabled: true,
+  },
+  {
+    id: "PY-COMMAND-INJECTION-001",
+    title: "Request or user input reaches a Python command execution API",
+    description:
+      "A request-controlled value appears in os.system, os.popen, or subprocess execution. A verifier must prove attacker reachability and command impact.",
+    severity: "CRITICAL",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.py"],
+    enabled: true,
+  },
+  {
+    id: "PY-SQL-INJECTION-001",
+    title: "Request-controlled value reaches a Python query execution call",
+    description:
+      "A request-controlled value appears in a database execute call. Parameterization and actual reachability must be independently verified.",
+    severity: "HIGH",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.py"],
+    enabled: true,
+  },
+  {
+    id: "PY-SSTI-001",
+    title: "Request-controlled template source in Python",
+    description:
+      "User-controlled data appears to reach a server-side template source. A validator must demonstrate template expression impact.",
+    severity: "CRITICAL",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.py"],
+    enabled: true,
+  },
+  {
+    id: "PY-SSRF-001",
+    title: "Request-controlled URL reaches a Python outbound request API",
+    description:
+      "A request-controlled URL appears to reach an outbound request sink. Scheme, host, port, DNS, and redirect policy require verification.",
+    severity: "HIGH",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.py"],
+    enabled: true,
+  },
+  {
+    id: "PY-OPEN-REDIRECT-001",
+    title: "Request-controlled redirect target in Python",
+    description:
+      "A redirect target appears to use request-controlled data. Same-origin and allowlist constraints require verification.",
+    severity: "HIGH",
+    evidenceRequired: "T2_REPRODUCIBLE",
+    globs: ["**/*.py"],
     enabled: true,
   },
 ];

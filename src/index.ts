@@ -18,3 +18,5 @@ export * from "./dedup.js";
 export * from "./threat.js";
 export * from "./revalidation.js";
 export * from "./scoring.js";
+export * from "./realvuln.js";
+export * from "./python-graph.js";

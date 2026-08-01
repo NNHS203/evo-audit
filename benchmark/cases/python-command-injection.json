@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "caseId": "python-command-injection-001",
+  "split": "development",
+  "language": "python",
+  "file": "app.py",
+  "code": "from flask import request\nimport subprocess\n\ndef run():\n    command = request.args.get('command')\n    return subprocess.run(command, shell=True)\n",
+  "property": "A request argument reaches subprocess execution through a local assignment.",
+  "expected": {
+    "vulnerable": true,
+    "ruleId": "PY-COMMAND-INJECTION-001",
+    "minimumReportableEvidence": "T2_REPRODUCIBLE"
+  },
+  "notes": [
+    "Exercises Python source tracking and a command-execution sink.",
+    "Candidate evidence is not a verified exploit without an independent validator."
+  ]
+}

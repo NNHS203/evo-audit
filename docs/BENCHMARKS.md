@@ -34,6 +34,21 @@ silently mixed into the JS/TS score. The [upstream repository](https://github.co
 must be used with its own manifest and scorer. Scores from different benchmark
 versions are not interchangeable.
 
+The repository provides a reproducible adapter for one selected upstream
+repository:
+
+```bash
+git clone --depth 1 https://github.com/kolega-ai/Real-Vuln-Benchmark.git ./Real-Vuln-Benchmark
+evo-audit realvuln ./Real-Vuln-Benchmark \
+  realvuln-damn-vulnerable-flask-application --output ./realvuln-runs
+```
+
+The adapter verifies the manifest's full checkout commit and records the
+ground-truth SHA-256, audited tree digest, and run artifact. It does not claim
+that one repository is a benchmark-wide score; use the same command for each
+selected pinned repository and aggregate only after fixing the benchmark
+version and execution policy.
+
 For a local pinned checkout, a case can use a source reference instead of
 embedding code:
 
