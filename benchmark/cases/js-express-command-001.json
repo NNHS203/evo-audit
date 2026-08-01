@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "caseId": "framework-express-command-001",
+  "split": "framework-holdout",
+  "language": "javascript",
+  "files": [
+    {
+      "path": "server/routes.js",
+      "code": "const { exec } = require('node:child_process');\n\napp.get('/health', (req, res) => {\n  const command = req.query.command;\n  exec(command, (error, stdout) => res.send(stdout));\n});\n"
+    }
+  ],
+  "property": "An Express-style query parameter reaches child_process execution.",
+  "expected": { "vulnerable": true, "ruleId": "JS-COMMAND-INJECTION-001" },
+  "notes": ["Framework holdout: Express route boundary and command sink."]
+}

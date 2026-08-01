@@ -232,8 +232,8 @@ The workflow rationale and research references are documented in
 [`docs/WORKFLOW.md`](docs/WORKFLOW.md).
 
 The pinned local manifest also includes a `framework-holdout` split covering
-FastAPI, Django, and Flask flows; it is scored separately from the fast
-development gate.
+FastAPI, Django, Flask, and Express flows; it is scored separately from the
+fast development gate.
 
 ## Safety boundary
 

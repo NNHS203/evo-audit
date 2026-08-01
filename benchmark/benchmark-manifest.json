@@ -115,6 +115,24 @@
       "caseId": "framework-flask-upload-001",
       "split": "framework-holdout",
       "sha256": "eb7f2de6d5ac06bab6c24ce076a09f80e0eb5e9eb9d2763ada167a1012312b08"
+    },
+    {
+      "file": "cases/js-express-command-001.json",
+      "caseId": "framework-express-command-001",
+      "split": "framework-holdout",
+      "sha256": "d8ebdb6c6ded2c67cd21ab3926ac5bd49ecd08ee2dad6b77e5d12fd5bed6f57b"
+    },
+    {
+      "file": "cases/js-express-redirect-001.json",
+      "caseId": "framework-express-redirect-001",
+      "split": "framework-holdout",
+      "sha256": "fbbfc5e1576df0cf15c08ecbec3017c2b8170350d50896cbc8f1c6e621c7d310"
+    },
+    {
+      "file": "cases/js-express-safe-redirect-001.json",
+      "caseId": "framework-express-safe-redirect-001",
+      "split": "framework-holdout",
+      "sha256": "77b88a99a14e48db6f7f43bba88addc518523ce0fb900af0574a0a90eb754af1"
     }
   ],
   "notes": [

@@ -174,9 +174,9 @@ The runner verifies the checkout HEAD, copies it read-only into an isolated
 temporary case workspace, excludes `.git`, dependencies, build output, and
 audit configuration, then records the resulting source tree digest.
 
-The checked-in `framework-holdout` split adds five dependency-free cases for
-FastAPI SQL/NoSQL flows, Django object ownership, Flask uploads, and a safe
-fixed-key NoSQL control. Run it with the pinned manifest:
+The checked-in `framework-holdout` split adds eight dependency-free cases for
+FastAPI SQL/NoSQL flows, Django object ownership, Flask uploads, Express
+command/redirect flows, and safe controls. Run it with the pinned manifest:
 
 ```bash
 evo-audit benchmark ./benchmark/cases \
@@ -185,7 +185,7 @@ evo-audit benchmark ./benchmark/cases \
 ```
 
 The current deterministic observation is candidate precision `1.000`, recall
-`1.000`, and FPR `0.000` on these five cases; it remains a holdout observation,
+`1.000`, and FPR `0.000` on these eight cases; it remains a holdout observation,
 and reportable recall is `0.000` until independent validation runs.
 
 [RepoAudit](https://arxiv.org/abs/2501.18160) is an important research baseline:

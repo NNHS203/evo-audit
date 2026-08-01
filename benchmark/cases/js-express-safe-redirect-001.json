@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "caseId": "framework-express-safe-redirect-001",
+  "split": "framework-holdout",
+  "language": "typescript",
+  "files": [
+    {
+      "path": "server/routes.ts",
+      "code": "app.get('/home', (_req, res) => {\n  return res.redirect('/dashboard');\n});\n"
+    }
+  ],
+  "property": "A fixed same-origin redirect must not be treated as an open redirect.",
+  "expected": { "vulnerable": false, "ruleId": "JS-OPEN-REDIRECT-001" },
+  "notes": ["Negative control for request-controlled redirect targets."]
+}

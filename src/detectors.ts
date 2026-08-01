@@ -411,18 +411,18 @@ function findMatch(rule: PlaybookRule, line: string, rawLine = line, relativePat
     };
   }
 
-  if (
-    rule.id === "JS-OPEN-REDIRECT-001" &&
-    /\b(?:res|response)\s*\.\s*redirect\s*\([^)]*/.test(line) &&
-    new RegExp(requestInput + "|(?:url|next|redirect)", "i").test(line)
-  ) {
-    return {
-      rootCause: "A redirect target appears to use request-controlled data.",
-      impact: "An attacker may redirect a user to an external destination if no same-origin or allowlist check exists.",
-      remediation: "Use a same-origin default or an explicit destination allowlist, then verify external destinations are rejected.",
-      kind: "SOURCE_TO_SINK",
-      limitation: "This pass cannot prove whether a guard exists in a helper or middleware.",
-    };
+  if (rule.id === "JS-OPEN-REDIRECT-001") {
+    const redirectIndex = line.search(/\b(?:res|response)\s*\.\s*redirect\s*\(/i);
+    const redirectArgument = redirectIndex >= 0 ? callArgumentText(line, redirectIndex) : "";
+    if (redirectIndex >= 0 && new RegExp(requestInput + "|(?:url|next|redirect)", "i").test(redirectArgument)) {
+      return {
+        rootCause: "A redirect target appears to use request-controlled data.",
+        impact: "An attacker may redirect a user to an external destination if no same-origin or allowlist check exists.",
+        remediation: "Use a same-origin default or an explicit destination allowlist, then verify external destinations are rejected.",
+        kind: "SOURCE_TO_SINK",
+        limitation: "This pass cannot prove whether a guard exists in a helper or middleware.",
+      };
+    }
   }
 
   if (

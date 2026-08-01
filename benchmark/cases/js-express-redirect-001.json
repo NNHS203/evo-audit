@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "caseId": "framework-express-redirect-001",
+  "split": "framework-holdout",
+  "language": "javascript",
+  "files": [
+    {
+      "path": "server/auth.js",
+      "code": "app.get('/login', (req, res) => {\n  const next = req.query.next;\n  return res.redirect(next);\n});\n"
+    }
+  ],
+  "property": "An Express-style redirect target is controlled by a query parameter without an allowlist.",
+  "expected": { "vulnerable": true, "ruleId": "JS-OPEN-REDIRECT-001" },
+  "notes": ["Framework holdout: redirect sink must be independently checked for same-origin policy."]
+}
