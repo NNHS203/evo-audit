@@ -87,6 +87,7 @@ async function executeInContainer(run: AuditRun, command: string, request: Valid
     "--read-only",
     "--cap-drop", "ALL",
     "--security-opt", "no-new-privileges",
+    "--user", "1000:1000",
     "--pids-limit", "128",
     "--memory", "512m",
     "--cpus", "1",

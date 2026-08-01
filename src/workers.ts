@@ -8,7 +8,8 @@ import type {
   FindingStatus,
   SourceLocation,
 } from "./types.js";
-import { buildAuditPlan } from "./workflow.js";
+import { buildAuditPlan, refreshCoverageMatrix } from "./workflow.js";
+import { deduplicateRun } from "./dedup.js";
 
 const statusRank: Record<FindingStatus, number> = {
   HARNESS_FAILED: 0,
@@ -215,12 +216,44 @@ function nonNegativeNumber(value: number | undefined, fallback: number): number 
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : fallback;
 }
 
+function applyHuntCoverageReceipt(run: AuditRun, result: AuditWorkerResult): void {
+  if (!result.taskId || !run.plan || !run.recon?.coverageMatrix) return;
+  const task = run.plan.tasks.find((candidate) => candidate.id === result.taskId);
+  if (!task || task.phase !== "HUNT" || !task.coverageCellId) return;
+  const cell = run.recon.coverageMatrix.cells.find((candidate) => candidate.id === task.coverageCellId);
+  if (!cell) return;
+  if (result.error) {
+    cell.status = "UNKNOWN";
+    cell.evidence = [...new Set([...cell.evidence, `${task.id}:HARNESS_FAILED`])];
+    return;
+  }
+  cell.attempts = (cell.attempts ?? 0) + 1;
+  const reportedRule = result.findings.some((candidate) => candidate.ruleId === cell.ruleId);
+  const matching = reportedRule
+    ? run.findings.filter((finding) => finding.ruleId === cell.ruleId && (cell.area === "repository" || finding.locations.some((location) => cell.files.includes(location.file))))
+    : [];
+  if (matching.length > 0) {
+    cell.status = "CANDIDATE";
+    cell.evidence = [...new Set([...cell.evidence, ...matching.map((finding) => finding.id), task.id])];
+  } else {
+    cell.status = "UNKNOWN";
+    cell.evidence = [...new Set([...cell.evidence, `${task.id}:NO_CANDIDATE`])];
+  }
+}
+
 export function mergeWorkerResult(runInput: AuditRun, result: AuditWorkerResult): AuditRun {
-  const run = structuredClone(runInput);
+  let run = structuredClone(runInput);
+  if (result.receiptId && run.workerReceipts?.some((receipt) => receipt.receiptId === result.receiptId)) {
+    run.notes = uniqueStrings([...run.notes, `Worker receipt ${result.receiptId} was already applied; ingest is idempotent.`]);
+    run.completedAt = new Date().toISOString();
+    return run;
+  }
   for (const candidate of result.findings) {
     const finding = mergeFinding(run, result, candidate);
     updateObligationState(run, finding);
   }
+
+  run = deduplicateRun(run);
 
   const reported = result.tokenAccounting;
   if (reported) {
@@ -233,9 +266,18 @@ export function mergeWorkerResult(runInput: AuditRun, result: AuditWorkerResult)
     };
   }
 
+  if (result.receiptId) {
+    run.workerReceipts = [
+      ...(run.workerReceipts ?? []),
+      { receiptId: result.receiptId, worker: result.worker, taskId: result.taskId, usage: reported ? { inputTokens: nonNegativeNumber(reported.inputTokens, 0), outputTokens: nonNegativeNumber(reported.outputTokens, 0), cachedTokens: nonNegativeNumber(reported.cachedTokens, 0), estimatedCostUsd: nonNegativeNumber(reported.estimatedCostUsd, 0), source: "WORKER_REPORTED" } : undefined, appliedAt: new Date().toISOString() },
+    ];
+  }
+
   const workerNote = `Worker ${result.worker} ingested; claims remain evidence-gated.`;
   run.notes = uniqueStrings([...run.notes, workerNote, ...(result.notes ?? [])]);
   if (run.coverage) run.coverage = { ...run.coverage, semantic: "PARTIAL_WORKER" };
+  applyHuntCoverageReceipt(run, result);
+  refreshCoverageMatrix(run);
   run.plan = buildAuditPlan(run, run.plan?.tokenBudget ?? 12_000);
   if (result.taskId) {
     const task = run.plan.tasks.find((candidate) => candidate.id === result.taskId);

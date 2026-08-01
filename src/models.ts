@@ -43,6 +43,7 @@ export interface ModelCompletionResponse {
   text: string;
   usage: TokenAccounting;
   finishReason?: string;
+  cacheHit?: boolean;
 }
 
 export interface ModelStatus {
@@ -101,12 +102,32 @@ export function defaultModelConfig(): AuditModelConfig {
   return { schemaVersion: 1, models: [], auto: { enabled: true, preferred: [], minimumQualityTier: 1 } };
 }
 
+function environmentModelConfig(): AuditModelConfig {
+  const modelName = process.env.EVO_AUDIT_MODEL?.trim();
+  if (!modelName) return defaultModelConfig();
+  const apiKeyEnv = process.env.EVO_AUDIT_API_KEY ? "EVO_AUDIT_API_KEY" : process.env.OPENAI_API_KEY ? "OPENAI_API_KEY" : undefined;
+  const oauthEnv = process.env.EVO_AUDIT_OAUTH_TOKEN ? "EVO_AUDIT_OAUTH_TOKEN" : undefined;
+  return {
+    schemaVersion: 1,
+    auto: { enabled: true, preferred: ["env-default"], minimumQualityTier: 1 },
+    models: [{
+      id: "env-default",
+      transport: "OPENAI_COMPATIBLE",
+      model: modelName,
+      baseUrl: (process.env.EVO_AUDIT_BASE_URL ?? "https://api.openai.com/v1").replace(/\/$/, ""),
+      auth: apiKeyEnv ? { method: "API_KEY", apiKeyEnv } : oauthEnv ? { method: "OAUTH", accessTokenEnv: oauthEnv } : { method: "NONE" },
+      qualityTier: 3,
+      capabilities: ["HUNT", "INVESTIGATE", "VALIDATE", "JSON"],
+    }],
+  };
+}
+
 export async function loadModelConfig(root: string, configPath?: string): Promise<AuditModelConfig> {
   const file = configPath ? path.resolve(root, configPath) : path.join(root, DEFAULT_CONFIG_NAME);
   try {
     return normalizeConfig(JSON.parse(await fs.readFile(file, "utf8")));
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return defaultModelConfig();
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return environmentModelConfig();
     throw error;
   }
 }
@@ -165,6 +186,14 @@ function modelScore(model: ModelDefinition, request: ModelTaskRequest, policy: A
   return preference + quality + budgetPressure;
 }
 
+function withinAutoCost(model: ModelDefinition, request: ModelTaskRequest, policy: AutoModelPolicy): boolean {
+  if (policy.maxCostPerRunUsd === undefined) return true;
+  const outputTokens = Math.max(128, request.budgetTokens - request.estimatedInputTokens);
+  const estimate = request.estimatedInputTokens / 1_000_000 * positive(model.pricing?.inputPerMillionUsd)
+    + outputTokens / 1_000_000 * positive(model.pricing?.outputPerMillionUsd);
+  return estimate <= policy.maxCostPerRunUsd;
+}
+
 function chooseModel(config: AuditModelConfig, request: ModelTaskRequest): ModelDefinition {
   if (request.model && request.model !== "auto") {
     const exact = config.models.find((candidate) => candidate.id === request.model && candidate.enabled !== false);
@@ -174,7 +203,7 @@ function chooseModel(config: AuditModelConfig, request: ModelTaskRequest): Model
   }
   if (!config.auto.enabled) throw new Error("Auto model routing is disabled and no explicit model was selected.");
   const minimum = positive(config.auto.minimumQualityTier, 0);
-  const candidates = config.models.filter((model) => model.enabled !== false && model.qualityTier >= minimum && capabilityMatch(model, request));
+  const candidates = config.models.filter((model) => model.enabled !== false && model.qualityTier >= minimum && capabilityMatch(model, request) && withinAutoCost(model, request, config.auto));
   if (candidates.length === 0) throw new Error("No enabled model satisfies the task capabilities and auto-model policy.");
   return [...candidates].sort((left, right) => modelScore(right, request, config.auto) - modelScore(left, request, config.auto) || left.id.localeCompare(right.id))[0];
 }
@@ -233,7 +262,10 @@ async function completeAnthropic(model: ModelDefinition, credential: string | nu
   const system = request.messages.filter((message) => message.role === "system").map((message) => message.content).join("\n\n");
   const messages = request.messages.filter((message) => message.role !== "system");
   const headers: Record<string, string> = { "content-type": "application/json", "anthropic-version": "2023-06-01" };
-  if (credential) headers.authorization = `Bearer ${credential}`;
+  if (credential) {
+    if (model.auth.method === "API_KEY") headers["x-api-key"] = credential;
+    else headers.authorization = `Bearer ${credential}`;
+  }
   const result = await requestJson(`${model.baseUrl}/v1/messages`, {
     method: "POST",
     headers,

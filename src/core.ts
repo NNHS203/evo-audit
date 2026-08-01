@@ -7,6 +7,7 @@ import { detectFindings } from "./detectors.js";
 import { buildCodeGraph, detectGraphFindings } from "./graph.js";
 import { formatTokenUsage, recordSessionUsage, tokenUsageTotals } from "./usage.js";
 import { defaultModelConfig } from "./models.js";
+import { defaultThreatModelOverrides, renderThreatModel } from "./threat.js";
 import { buildAuditPlan, buildAuditRecon, planSummary } from "./workflow.js";
 import type {
   AuditConfig,
@@ -45,6 +46,8 @@ export async function initWorkspace(root: string): Promise<void> {
   if (!(await pathExists(playbookPath))) await writeJson(playbookPath, defaultPlaybook);
   const modelConfigPath = path.join(root, "audit.models.json");
   if (!(await pathExists(modelConfigPath))) await writeJson(modelConfigPath, defaultModelConfig());
+  const threatModelPath = path.join(root, "audit.threat.json");
+  if (!(await pathExists(threatModelPath))) await writeJson(threatModelPath, defaultThreatModelOverrides());
 }
 
 function shouldIgnore(relativePath: string, config: AuditConfig): boolean {
@@ -167,9 +170,7 @@ export async function runAudit(rootInput: string, options: { output: string; str
     allObligations.push(...result.obligations);
   }
 
-  const reportableFindings = options.strict
-    ? allFindings.filter((finding) => playbook.evidencePolicy.reportableTiers.includes(finding.evidenceTier) && finding.status === "VERIFIED")
-    : allFindings;
+  const reportableFindings = allFindings.filter((finding) => playbook.evidencePolicy.reportableTiers.includes(finding.evidenceTier) && finding.status === "VERIFIED");
   const semanticDelta = computeSemanticDelta(files, options.baseline);
   const codeGraph = buildCodeGraph(files, sourceContents, config.includeExtensions);
   const graphResult = detectGraphFindings(codeGraph, playbook, runId, allFindings);
@@ -183,7 +184,7 @@ export async function runAudit(rootInput: string, options: { output: string; str
     capturedAt: completedAt,
     files,
   };
-  const recon = await buildAuditRecon(root, files, sourceContents, allFindings, semanticDelta, config, playbook, codeGraph);
+  const recon = await buildAuditRecon(root, files, sourceContents, allFindings, semanticDelta, config, playbook, codeGraph, snapshot.treeDigest);
   const run: AuditRun = {
     schemaVersion: 1,
     runId,
@@ -245,6 +246,9 @@ export function summarizeRun(run: AuditRun, options: { findingIds?: string[]; se
     `Run ${run.runId}`,
     `Mode: ${run.mode}  Files: ${run.files.length}  Obligations: ${run.obligations.length}`,
     `Findings: ${countText || "none"}`,
+    run.recon?.coverageMatrix
+      ? `Coverage: semantic=${run.coverage.semantic}  cells=${run.recon.coverageMatrix.cells.length}  hunt=${run.recon.coverageMatrix.cells.filter((cell) => cell.status === "HUNT_REQUIRED").length}  unknown=${run.recon.coverageMatrix.cells.filter((cell) => cell.status === "UNKNOWN").length}  validated=${run.recon.coverageMatrix.cells.filter((cell) => cell.status === "VALIDATED").length}`
+      : `Coverage: semantic=${run.coverage.semantic}  matrix=unavailable`,
     `Tokens: current ${formatTokenUsage(tokenUsageTotals(run.tokenAccounting))} (source=${run.tokenAccounting.source})`,
     planSummary(run.plan),
   ];
@@ -268,6 +272,11 @@ export async function persistRunArtifacts(artifactDir: string, run: AuditRun): P
   await writeJson(path.join(artifactDir, "findings.json"), run.findings);
   await writeJson(path.join(artifactDir, "obligations.json"), run.obligations);
   if (run.recon) await writeJson(path.join(artifactDir, "recon.json"), run.recon);
+  if (run.recon?.threatModel) {
+    await writeJson(path.join(artifactDir, "threat-model.json"), run.recon.threatModel);
+    await fs.writeFile(path.join(artifactDir, "threat-model.md"), renderThreatModel(run.recon.threatModel), "utf8");
+  }
+  if (run.dedup) await writeJson(path.join(artifactDir, "dedup.json"), run.dedup);
   if (run.plan) await writeJson(path.join(artifactDir, "plan.json"), run.plan);
   await writeJson(path.join(artifactDir, "manifest.json"), {
     schemaVersion: 1,
@@ -277,11 +286,13 @@ export async function persistRunArtifacts(artifactDir: string, run: AuditRun): P
     snapshot: run.snapshot,
     coverage: run.coverage,
     recon: run.recon,
+    dedup: run.dedup,
     plan: run.plan,
     semanticDelta: run.semanticDelta,
     reportableFindingIds: run.reportableFindingIds,
     playbook: run.playbook,
     tokenAccounting: run.tokenAccounting,
+    workerReceipts: run.workerReceipts,
   });
   return session;
 }

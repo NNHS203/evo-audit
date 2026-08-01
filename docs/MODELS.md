@@ -29,6 +29,11 @@ Create `audit.models.json` in the audited repository (or pass `--config`):
 The key is read only from the named environment variable. Raw keys and access
 tokens in `audit.models.json` are rejected.
 
+For a quick OpenAI-compatible setup without a config file, set
+`EVO_AUDIT_MODEL` and either `EVO_AUDIT_API_KEY` or `OPENAI_API_KEY` (optionally
+`EVO_AUDIT_BASE_URL`). The loader creates an `env-default` model in memory; the
+secret is never written to the repository.
+
 List providers without making a network request:
 
 ```bash
@@ -84,3 +89,9 @@ be used to tune `qualityTier`, preferred order, and playbook policy.
 Provider responses are normalized to the same completion and token-usage
 contract. Model calls are not validation evidence; they are worker input to the
 existing candidate and validator workflow.
+
+API/OAuth providers receive the bounded source and graph context selected for a
+task. Do not configure an external provider for repositories whose policy does
+not permit source sharing; use a local OpenAI-compatible endpoint or omit model
+execution. Credentials are never placed in prompts, run manifests, or model
+cache keys.

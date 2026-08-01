@@ -58,6 +58,12 @@ allocation. The worker must return its `taskId` and token accounting. Results
 that exceed the allocation are recorded as `BLOCKED`; they do not silently
 expand the budget.
 
+Recon also emits an area-by-attack-class coverage matrix. Empty cells create
+small HUNT tasks; a completed no-match task becomes `UNKNOWN` and can receive a
+bounded second pass, never a clean verdict. Worker receipts make replay and
+local prompt/model cache hits idempotent. Deterministic dedup clusters only
+matching source snippets and keeps distinct sink instances separate.
+
 ### 4. Evidence state
 
 The state machine is intentionally conservative:
@@ -118,6 +124,7 @@ playbook revision and per model/harness adapter:
 6. **Tokens per closed obligation** — spend efficiency, not raw token volume.
 7. **Revalidation survival** — findings whose root cause remains fixed after a
    proposed patch is tested.
+8. **Replay/cache rate** - worker receipts reused without new provider calls.
 
 RealVuln is a useful external benchmark design reference because it releases
 ground truth, scanner outputs, and scoring code, and gives recall-weighted F3

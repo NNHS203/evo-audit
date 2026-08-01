@@ -67,6 +67,29 @@ interface Scope {
   controls: string[];
 }
 
+interface InterproceduralScope {
+  functionNodeId: string;
+  summary: FunctionSummary | null;
+  tainted: Map<string, string[]>;
+  parameterDerived: Map<string, Set<string>>;
+}
+
+interface FunctionSummary {
+  name: string;
+  file: string;
+  functionNodeId: string;
+  parameters: string[];
+  sinks: Array<{ sinkNodeId: string; parameterNames: string[] }>;
+}
+
+interface CallSite {
+  name: string;
+  callNodeId: string;
+  file: string;
+  argumentOrigins: string[][];
+  argumentParameters: string[][];
+}
+
 interface GraphBuilder {
   nodes: CodeGraphNode[];
   edges: CodeGraphEdge[];
@@ -220,7 +243,7 @@ function resolveRelativeImport(from: string, specifier: string, files: Set<strin
   return candidates.map(normalizePath).find((candidate) => files.has(candidate)) ?? null;
 }
 
-function addFlow(builder: GraphBuilder, sourceId: string, sinkId: string, controls: string[], reason: string): void {
+function addFlow(builder: GraphBuilder, sourceId: string, sinkId: string, controls: string[], reason: string, pathNodeIds = [sourceId, sinkId]): void {
   const key = `${sourceId}\0${sinkId}`;
   if (builder.flowKeys.has(key)) return;
   builder.flowKeys.add(key);
@@ -229,7 +252,7 @@ function addFlow(builder: GraphBuilder, sourceId: string, sinkId: string, contro
     id,
     sourceNodeId: sourceId,
     sinkNodeId: sinkId,
-    pathNodeIds: [sourceId, sinkId],
+    pathNodeIds,
     controlNodeIds: [...controls],
     status: "POSSIBLE",
     reason,
@@ -313,6 +336,103 @@ function analyzeFile(builder: GraphBuilder, file: FileFingerprint, content: stri
   visit(sourceFile, rootScope);
 }
 
+function parameterReferences(expression: ts.Node, scope: InterproceduralScope): string[] {
+  const references = new Set<string>();
+  const visit = (node: ts.Node): void => {
+    if (ts.isIdentifier(node)) {
+      for (const name of scope.parameterDerived.get(node.text) ?? []) references.add(name);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(expression);
+  return [...references];
+}
+
+function analyzeInterprocedural(builder: GraphBuilder, files: FileFingerprint[], contents: Map<string, string>): void {
+  const summaries: FunctionSummary[] = [];
+  const calls: CallSite[] = [];
+  for (const file of files) {
+    const sourceFile = ts.createSourceFile(file.path, contents.get(file.path) ?? "", ts.ScriptTarget.Latest, true, scriptKind(file.path));
+    const fileNodeId = builder.fileNodes.get(file.path) ?? `file:${stableId([file.path])}`;
+    const rootScope: InterproceduralScope = { functionNodeId: fileNodeId, summary: null, tainted: new Map(), parameterDerived: new Map() };
+    const visit = (node: ts.Node, scope: InterproceduralScope): void => {
+      let active = scope;
+      if (isFunctionLike(node)) {
+        const functionNodeId = addNode(builder, sourceFile, node, "FUNCTION", functionName(node, sourceFile), "Function or method scope used for interprocedural flow summaries.");
+        const parameters = node.parameters.filter((parameter) => ts.isIdentifier(parameter.name)).map((parameter) => (parameter.name as ts.Identifier).text);
+        const summary: FunctionSummary = { name: "name" in node && node.name && ts.isIdentifier(node.name) ? node.name.text : "anonymous", file: file.path, functionNodeId, parameters, sinks: [] };
+        summaries.push(summary);
+        const parameterDerived = new Map<string, Set<string>>();
+        for (const parameter of parameters) parameterDerived.set(parameter, new Set([parameter]));
+        active = { functionNodeId, summary, tainted: new Map(scope.tainted), parameterDerived };
+        addEdge(builder, { from: fileNodeId, to: functionNodeId, kind: "CONTAINS", confidence: "HIGH" });
+      }
+
+      if (ts.isVariableDeclaration(node) && node.initializer && ts.isIdentifier(node.name)) {
+        const origins = sourceOriginsIn(builder, sourceFile, node.initializer, {
+          functionNodeId: active.functionNodeId,
+          tainted: active.tainted,
+          controls: [],
+        });
+        const params = parameterReferences(node.initializer, active);
+        if (origins.length > 0) active.tainted.set(node.name.text, origins);
+        if (params.length > 0) active.parameterDerived.set(node.name.text, new Set(params));
+      }
+
+      if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(node.left)) {
+        const origins = sourceOriginsIn(builder, sourceFile, node.right, { functionNodeId: active.functionNodeId, tainted: active.tainted, controls: [] });
+        const params = parameterReferences(node.right, active);
+        if (origins.length > 0) active.tainted.set(node.left.text, origins);
+        if (params.length > 0) active.parameterDerived.set(node.left.text, new Set(params));
+      }
+
+      if (ts.isCallExpression(node)) {
+        const name = callName(node.expression);
+        const callNodeId = addNode(builder, sourceFile, node, "CALL", name, "Call expression used for interprocedural flow resolution.");
+        addEdge(builder, { from: active.functionNodeId, to: callNodeId, kind: "CALLS", confidence: "MEDIUM", label: name });
+        const argumentOrigins = node.arguments.map((argument) => sourceOriginsIn(builder, sourceFile, argument, { functionNodeId: active.functionNodeId, tainted: active.tainted, controls: [] }));
+        const argumentParameters = node.arguments.map((argument) => parameterReferences(argument, active));
+        const kind = sinkKind(name);
+        if (kind) {
+          const sinkId = addNode(builder, sourceFile, node, "SINK", name, kind);
+          if (active.summary) active.summary.sinks.push({ sinkNodeId: sinkId, parameterNames: [...new Set(argumentParameters.flat())] });
+        } else if (name && !isGuardCall(name)) {
+          calls.push({ name: name.split(".").at(-1) ?? name, callNodeId, file: file.path, argumentOrigins, argumentParameters });
+        }
+      }
+
+      ts.forEachChild(node, (child) => visit(child, active));
+    };
+    visit(sourceFile, rootScope);
+  }
+
+  const byName = new Map<string, FunctionSummary[]>();
+  for (const summary of summaries) {
+    if (summary.name === "anonymous") continue;
+    const list = byName.get(summary.name) ?? [];
+    list.push(summary);
+    byName.set(summary.name, list);
+  }
+  for (const call of calls) {
+    for (const summary of byName.get(call.name) ?? []) {
+      addEdge(builder, { from: call.callNodeId, to: summary.functionNodeId, kind: "CALLS", confidence: "MEDIUM", label: summary.name });
+      for (const sink of summary.sinks) {
+        for (const parameterName of sink.parameterNames) {
+          const parameterIndex = summary.parameters.indexOf(parameterName);
+          if (parameterIndex < 0) continue;
+          for (const sourceId of call.argumentOrigins[parameterIndex] ?? []) {
+            addFlow(builder, sourceId, sink.sinkNodeId, [], `A call-site argument reaches parameter ${parameterName} and then a ${nodesFor(builder, sink.sinkNodeId)?.detail ?? "dangerous"} sink.`, [sourceId, call.callNodeId, sink.sinkNodeId]);
+          }
+        }
+      }
+    }
+  }
+}
+
+function nodesFor(builder: GraphBuilder, nodeId: string): CodeGraphNode | undefined {
+  return builder.nodes.find((node) => node.id === nodeId);
+}
+
 export function buildCodeGraph(files: FileFingerprint[], contents: Map<string, string>, includeExtensions: string[]): AuditCodeGraph {
   const builder: GraphBuilder = {
     nodes: [],
@@ -327,6 +447,7 @@ export function buildCodeGraph(files: FileFingerprint[], contents: Map<string, s
   };
   buildFileGraph(builder, files, contents, includeExtensions);
   for (const file of files) analyzeFile(builder, file, contents.get(file.path) ?? "");
+  analyzeInterprocedural(builder, files, contents);
   builder.nodes.sort((left, right) => left.id.localeCompare(right.id));
   builder.edges.sort((left, right) => `${left.from}\0${left.to}\0${left.kind}\0${left.label ?? ""}`.localeCompare(`${right.from}\0${right.to}\0${right.kind}\0${right.label ?? ""}`));
   builder.flows.sort((left, right) => left.id.localeCompare(right.id));

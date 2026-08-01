@@ -16,6 +16,7 @@ import { mergeWorkerResult } from "../src/workers.js";
 import { loadModelConfig, ModelRegistry } from "../src/models.js";
 import { workerResultFromCompletion } from "../src/worker-runner.js";
 import { runValidationRequest } from "../src/validation-runner.js";
+import { deduplicateRun } from "../src/dedup.js";
 
 test("candidate detection masks fixtures, comments, and descriptions but keeps code", () => {
   const source = [
@@ -58,7 +59,7 @@ test("run persists replayable evidence artifacts", async () => {
   assert.equal(run.tokenAccounting.source, "DETERMINISTIC");
   assert.equal(run.semanticDelta.basis, "FULL_SCAN");
   assert.deepEqual(run.semanticDelta.changed, ["app.ts"]);
-  assert.deepEqual(run.reportableFindingIds, [run.findings[0].id]);
+  assert.deepEqual(run.reportableFindingIds, []);
 
   const initialSession = await readJson<{ total: { totalTokens: number }; runs: unknown[] }>(path.join(output, "session.json"));
   assert.equal(initialSession.total.totalTokens, 0);
@@ -78,6 +79,9 @@ test("run persists replayable evidence artifacts", async () => {
   assert.equal((await readFile(path.join(artifactDir, "manifest.json"), "utf8")).includes(run.runId), true);
   assert.equal((await readFile(path.join(artifactDir, "recon.json"), "utf8")).includes("contextDigest"), true);
   assert.equal((await readFile(path.join(artifactDir, "plan.json"), "utf8")).includes("tokenBudget"), true);
+  assert.equal(run.recon?.threatModel?.trustBoundaries.length, 4);
+  assert.equal((await readFile(path.join(artifactDir, "threat-model.md"), "utf8")).includes("Threat Model, Trust Boundaries, and Assumptions"), true);
+  assert.equal((await readFile(path.join(root, "audit.threat.json"), "utf8")).includes("schemaVersion"), true);
 });
 
 test("recon builds bounded graph context and the plan enforces the worker token budget", async () => {
@@ -137,6 +141,44 @@ test("AST graph finds an indirect source-to-command-sink path without flagging a
   assert.equal(graphFinding.locations[0].file, "indirect.ts");
   assert.equal(graphFinding.locations[1].file, "indirect.ts");
   assert.match(graphFinding.evidence[0].title, /AST data-flow/i);
+});
+
+test("HUNT completion records unknown coverage and schedules a bounded second pass", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-gapfill-"));
+  await initWorkspace(root);
+  await writeFile(path.join(root, "safe.ts"), "export const safe = true;\n", "utf8");
+  const initial = await runAudit(root, { output: path.join(root, "runs") });
+  const hunt = initial.run.plan?.tasks.find((task) => task.phase === "HUNT" && task.status === "PENDING");
+  assert.ok(hunt?.coverageCellId);
+  const after = mergeWorkerResult(initial.run, { worker: "gapfill-worker", taskId: hunt.id, findings: [] });
+  const cell = after.recon?.coverageMatrix?.cells.find((candidate) => candidate.id === hunt.coverageCellId);
+  assert.equal(cell?.status, "UNKNOWN");
+  assert.equal(cell?.attempts, 1);
+  assert.equal(after.plan?.tasks.some((task) => task.phase === "HUNT" && task.coverageCellId === hunt.coverageCellId && task.id.endsWith(":pass:1")), true);
+});
+
+test("worker receipts make replayed model output token-idempotent", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-worker-receipt-"));
+  await initWorkspace(root);
+  await writeFile(path.join(root, "safe.ts"), "export const safe = true;\n", "utf8");
+  const initial = await runAudit(root, { output: path.join(root, "runs") });
+  const first = mergeWorkerResult(initial.run, {
+    worker: "receipt-worker",
+    taskId: initial.run.plan?.tasks.find((task) => task.phase === "HUNT")?.id,
+    receiptId: "receipt-1",
+    findings: [],
+    tokenAccounting: { inputTokens: 100, outputTokens: 20, cachedTokens: 0, estimatedCostUsd: 0.01 },
+  });
+  const replay = mergeWorkerResult(first, {
+    worker: "receipt-worker",
+    taskId: first.plan?.tasks.find((task) => task.phase === "HUNT")?.id,
+    receiptId: "receipt-1",
+    findings: [],
+    tokenAccounting: { inputTokens: 100, outputTokens: 20, cachedTokens: 0, estimatedCostUsd: 0.01 },
+  });
+  assert.equal(first.tokenAccounting.inputTokens, 100);
+  assert.equal(replay.tokenAccounting.inputTokens, 100);
+  assert.equal(replay.workerReceipts?.length, 1);
 });
 
 test("model registry loads API/OAuth references and routes auto tasks without exposing secrets", async () => {
@@ -249,6 +291,29 @@ test("validation runner fails closed for an unsupported sandbox profile", async 
   assert.match(result.notes?.[0] ?? "", /Unsupported sandbox/i);
 });
 
+test("dedup keeps the strongest finding and closes only the duplicate obligation", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-dedup-"));
+  await initWorkspace(root);
+  await writeFile(path.join(root, "app.ts"), "export function run(req) { return eval(req.body.code); }\n", "utf8");
+  const { run } = await runAudit(root, { output: path.join(root, "runs") });
+  const original = run.findings[0];
+  const duplicate = structuredClone(original);
+  duplicate.id = `${original.id}-worker-copy`;
+  duplicate.obligationId = `${original.obligationId}-worker-copy`;
+  duplicate.status = "SUPPORTED";
+  run.findings.push(duplicate);
+  run.obligations.push({ ...run.obligations[0], id: duplicate.obligationId, status: "OPEN" });
+  run.reportableFindingIds = [original.id, duplicate.id];
+
+  const deduped = deduplicateRun(run);
+  assert.equal(deduped.dedup?.groups.length, 1);
+  assert.equal(deduped.dedup?.groups[0].canonicalFindingId, duplicate.id);
+  assert.equal(deduped.findings.find((finding) => finding.id === original.id)?.status, "DUPLICATE");
+  assert.equal(deduped.findings.find((finding) => finding.id === duplicate.id)?.status, "SUPPORTED");
+  assert.equal(deduped.obligations.find((obligation) => obligation.id === original.obligationId)?.status, "REJECTED");
+  assert.deepEqual(deduped.reportableFindingIds, [duplicate.id]);
+});
+
 test("strict mode does not promote static candidates", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "evo-audit-strict-"));
   await initWorkspace(root);
@@ -349,6 +414,7 @@ test("worker ingestion requires reproducible evidence before VERIFIED", async ()
   assert.equal(validation.run.findings[0].status, "VERIFIED");
   assert.equal(validation.run.obligations.find((obligation) => obligation.id === candidate.obligationId)?.status, "SATISFIED");
   assert.equal(validation.run.plan?.tasks.find((task) => task.phase === "VALIDATE" && task.findingId === candidate.id)?.status, "COMPLETED");
+  assert.equal(validation.run.recon?.coverageMatrix?.cells.some((cell) => cell.ruleId === candidate.ruleId && cell.status === "VALIDATED"), true);
 
   const hallucinated = mergeWorkerResult(validation.run, {
     worker: "hallucinating-worker",
@@ -484,8 +550,10 @@ test("compare, SARIF, and resume artifacts preserve audit state", async () => {
     negativeControl: { command: "negative", exitCode: 1, timedOut: false, passed: true, stdoutDigest: "c", stderrDigest: "d" },
   });
   assert.equal(compareRuns(verifiedBefore.run, after.run).findings[0].lifecycle, "UNKNOWN");
-  const sarif = toSarif(before.run) as { runs: Array<{ results: unknown[] }> };
+  const sarif = toSarif(before.run) as { runs: Array<{ results: Array<{ level: string; properties: { reportable: boolean } }> }> };
   assert.equal(sarif.runs[0].results.length, 1);
+  assert.equal(sarif.runs[0].results[0].level, "note");
+  assert.equal(sarif.runs[0].results[0].properties.reportable, false);
   const plan = buildResumePlan(before.run);
   assert.equal(plan.pendingObligations.length, 1);
   assert.equal(plan.findingsToValidate.length, 1);

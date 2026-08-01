@@ -197,6 +197,7 @@ export interface AuditRecon {
   };
   codeGraph?: import("./graph.js").AuditCodeGraph;
   coverageMatrix?: AuditCoverageMatrix;
+  threatModel?: import("./threat.js").AuditThreatModel;
   focusFiles: string[];
   contextDigest: string;
   notes: string[];
@@ -222,6 +223,7 @@ export interface AuditCoverageCell {
   files: string[];
   status: CoverageCellStatus;
   evidence: string[];
+  attempts: number;
 }
 
 export interface AuditCoverageMatrix {
@@ -230,6 +232,18 @@ export interface AuditCoverageMatrix {
   unknownCells: number;
   digest: string;
   notes: string[];
+}
+
+export interface AuditDedupGroup {
+  key: string;
+  canonicalFindingId: string;
+  duplicateFindingIds: string[];
+  reason: string;
+}
+
+export interface AuditDedup {
+  schemaVersion: 1;
+  groups: AuditDedupGroup[];
 }
 
 export interface AuditTask {
@@ -302,12 +316,14 @@ export interface AuditRun {
   snapshot: AuditSnapshot;
   coverage: AuditCoverage;
   recon?: AuditRecon;
+  dedup?: AuditDedup;
   plan?: AuditPlan;
   semanticDelta: SemanticDelta;
   obligations: AuditObligation[];
   findings: Finding[];
   reportableFindingIds: string[];
   tokenAccounting: TokenAccounting;
+  workerReceipts?: WorkerReceipt[];
   notes: string[];
 }
 
@@ -323,6 +339,7 @@ export interface AuditWorkerContext {
 export interface AuditWorkerResult {
   worker: string;
   taskId?: string;
+  receiptId?: string;
   error?: string;
   findings: Array<
     Partial<Finding> & {
@@ -334,6 +351,14 @@ export interface AuditWorkerResult {
   >;
   tokenAccounting?: Partial<TokenAccounting>;
   notes?: string[];
+}
+
+export interface WorkerReceipt {
+  receiptId: string;
+  worker: string;
+  taskId?: string;
+  usage?: TokenAccounting;
+  appliedAt: string;
 }
 
 export interface ValidationRequest {

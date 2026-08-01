@@ -1,7 +1,8 @@
 import { findingIdentity } from "./compare.js";
 import type { AuditRun, Finding } from "./types.js";
 
-function level(finding: Finding): "error" | "warning" | "note" {
+function level(finding: Finding, reportable: boolean): "error" | "warning" | "note" {
+  if (!reportable) return "note";
   if (finding.severity === "CRITICAL" || finding.severity === "HIGH") return "error";
   if (finding.severity === "MEDIUM") return "warning";
   return "note";
@@ -9,6 +10,7 @@ function level(finding: Finding): "error" | "warning" | "note" {
 
 export function toSarif(run: AuditRun): Record<string, unknown> {
   const rules = new Map(run.findings.map((finding) => [finding.ruleId, finding]));
+  const reportable = new Set(run.reportableFindingIds ?? []);
   return {
     version: "2.1.0",
     $schema: "https://json.schemastore.org/sarif-2.1.0.json",
@@ -31,7 +33,7 @@ export function toSarif(run: AuditRun): Record<string, unknown> {
           const location = finding.locations[0];
           return {
             ruleId: finding.ruleId,
-            level: level(finding),
+            level: level(finding, reportable.has(finding.id)),
             message: { text: `${finding.rootCause} ${finding.impact}` },
             locations: location
               ? [{ physicalLocation: { artifactLocation: { uri: location.file }, region: { startLine: location.line, startColumn: location.column } } }]
@@ -42,6 +44,7 @@ export function toSarif(run: AuditRun): Record<string, unknown> {
               evidenceTier: finding.evidenceTier,
               obligationId: finding.obligationId,
               limitations: finding.limitations,
+              reportable: reportable.has(finding.id),
             },
           };
         }),

@@ -33,6 +33,7 @@ Commands:
   resume <run.json> [--output FILE]   Write a resumable pending-work plan
   ingest <run.json> <worker.json>     Merge a Frontier worker result into a saved run
   worker <run.json> <task-id>         Run one HUNT/INVESTIGATE task with a configured model
+  worker <run.json> --all             Run pending worker tasks with bounded concurrency
   benchmark <cases-dir>               Run deterministic benchmark cases
   evolve <run.json> [--output FILE]   Propose playbook improvements from audit gaps
   report <run.json> [--format FORMAT] Print text, json, or sarif
@@ -252,18 +253,49 @@ async function main(): Promise<void> {
   }
 
   if (command === "worker") {
-    if (!input || !secondInput) throw new Error("worker requires a run.json and task-id");
+    if (!input || (!secondInput && !flag(args, "--all"))) throw new Error("worker requires a run.json and task-id, or --all");
     const runPath = path.resolve(cwd, input);
     const run = await readJson<AuditRun>(runPath);
+    const modelConfig = await loadModelConfig(run.root, valueFlag(args, "--config", ""));
+    const registry = new ModelRegistry(modelConfig);
+    const requestedModel = valueFlag(args, "--model", "auto");
+    const cacheDirectory = path.join(path.dirname(runPath), "worker-cache");
+    if (flag(args, "--all")) {
+      const concurrency = Math.max(1, Math.min(8, Number(valueFlag(args, "--concurrency", "2")) || 2));
+      const tasks = (run.plan?.tasks ?? []).filter((task) => ["HUNT", "INVESTIGATE"].includes(task.phase) && task.status === "PENDING").sort((left, right) => right.priority - left.priority || left.id.localeCompare(right.id));
+      let cursor = 0;
+      const results: AuditWorkerResult[] = [];
+      const worker = async (): Promise<void> => {
+        while (cursor < tasks.length) {
+          const task = tasks[cursor++];
+          const selected = registry.select({ phase: task.phase, priority: task.priority, estimatedInputTokens: 0, budgetTokens: task.budgetTokens, requiredCapabilities: [task.phase, "JSON"], model: requestedModel });
+          try {
+            results.push(await executeWorkerTask(run, task, registry, selected.id, { cacheDirectory }));
+          } catch (error) {
+            results.push({ worker: selected.id, taskId: task.id, error: error instanceof Error ? error.message : String(error), findings: [] });
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(concurrency, Math.max(1, tasks.length)) }, () => worker()));
+      let updated = run;
+      for (const result of results.sort((left, right) => (left.taskId ?? "").localeCompare(right.taskId ?? ""))) updated = mergeWorkerResult(updated, result);
+      const session = await persistRunArtifacts(path.dirname(runPath), updated);
+      console.log(`Workers: ${results.length} tasks  concurrency=${concurrency}`);
+      console.log(summarizeRun(updated, { session }));
+      console.log(`Updated: ${runPath}`);
+      return;
+    }
     const task = run.plan?.tasks.find((candidate) => candidate.id === secondInput);
     if (!task) throw new Error(`Task not found: ${secondInput}`);
     if (task.phase === "VALIDATE") throw new Error("worker cannot run VALIDATE tasks; use verify/validate with an independent validator");
     if (["COMPLETED", "BLOCKED", "DEFERRED"].includes(task.status)) throw new Error(`Task ${task.id} is ${task.status} and cannot be run without a new plan/review.`);
-    const modelConfig = await loadModelConfig(run.root, valueFlag(args, "--config", ""));
-    const registry = new ModelRegistry(modelConfig);
-    const requestedModel = valueFlag(args, "--model", "auto");
     const selected = registry.select({ phase: task.phase, priority: task.priority, estimatedInputTokens: 0, budgetTokens: task.budgetTokens, requiredCapabilities: [task.phase, "JSON"], model: requestedModel });
-    const result = await executeWorkerTask(run, task, registry, selected.id);
+    let result: AuditWorkerResult;
+    try {
+      result = await executeWorkerTask(run, task, registry, selected.id, { cacheDirectory });
+    } catch (error) {
+      result = { worker: selected.id, taskId: task.id, error: error instanceof Error ? error.message : String(error), findings: [] };
+    }
     const updated = mergeWorkerResult(run, result);
     const session = await persistRunArtifacts(path.dirname(runPath), updated);
     console.log(`Worker: ${result.worker}  task=${task.id}${result.error ? `  error=${result.error}` : ""}`);

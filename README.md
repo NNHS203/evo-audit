@@ -19,6 +19,8 @@ surfaces, and a lightweight module graph. The plan gives each obligation a
 priority, a bounded context slice, and a token allocation. This prevents the
 worker from receiving the whole repository by default and makes token budget a
 workflow constraint rather than a config value that is merely recorded.
+It also persists `threat-model.json` and `threat-model.md`; edit the generated
+`audit.threat.json` assumptions/exclusions when deployment context differs.
 
 ## Quick start
 
@@ -63,6 +65,10 @@ evo-audit plan ./audit-runs/<run>/run.json
 # Inspect or resume pending obligations.
 evo-audit status ./audit-runs/<run>/run.json
 evo-audit resume ./audit-runs/<run>/run.json
+
+# Run one bounded model task; `auto` is the default.
+evo-audit worker ./audit-runs/<run>/run.json <task-id> --model auto
+evo-audit worker ./audit-runs/<run>/run.json --all --concurrency 2
 ```
 
 Reports support `text`, `json`, and `sarif` formats. SARIF results include
@@ -83,6 +89,9 @@ Session total: total=1500 (...) across 1 run(s)
 Updating the same run replaces its previous contribution, so replaying an
 ingest or validation does not double-count tokens. `totalTokens` is defined as
 input plus output; cached tokens are shown separately for transparency.
+Worker tasks also carry a deterministic receipt keyed by snapshot, task,
+model, and prompt. Re-ingesting the same receipt is idempotent, and local
+worker-cache hits do not add provider tokens.
 
 ## Optimized worker loop
 

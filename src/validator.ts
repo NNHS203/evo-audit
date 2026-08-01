@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { discoverFiles, loadConfig } from "./core.js";
-import { buildAuditPlan } from "./workflow.js";
+import { buildAuditPlan, refreshCoverageMatrix } from "./workflow.js";
 import type {
   AuditRun,
   EvidenceItem,
@@ -177,6 +177,7 @@ export function applyValidationResult(runInput: AuditRun, result: ValidationResu
 
   run.notes = [...new Set([...run.notes, `Validator ${result.validator} applied: ${gate.status}.` , ...(result.notes ?? [])])];
   if (run.coverage) run.coverage = { ...run.coverage, semantic: "PARTIAL_WORKER" };
+  refreshCoverageMatrix(run);
   run.plan = buildAuditPlan(run, run.plan?.tokenBudget ?? 12_000);
   if (run.plan.tasks.length > 0 && run.plan.tasks.every((task) => task.status === "COMPLETED") && run.coverage) {
     run.coverage = { ...run.coverage, semantic: "VALIDATED" };

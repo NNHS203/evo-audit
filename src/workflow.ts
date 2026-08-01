@@ -4,6 +4,7 @@ import path from "node:path";
 import { maskNonCode } from "./detectors.js";
 import { buildCodeGraph } from "./graph.js";
 import type { AuditCodeGraph } from "./graph.js";
+import { buildThreatModel } from "./threat.js";
 import type {
   AuditConfig,
   CoverageCellStatus,
@@ -228,6 +229,7 @@ function buildCoverageMatrix(
       files: areaFiles,
       status,
       evidence: relevant.map((finding) => finding.id).sort(),
+      attempts: 0,
     };
   }));
   const unknownCells = cells.filter((cell) => (cell.status as string) === "UNKNOWN").length;
@@ -407,6 +409,7 @@ export async function buildAuditRecon(
   config: AuditConfig,
   playbook: AuditPlaybook,
   codeGraph: AuditCodeGraph = buildCodeGraph(files, contents, config.includeExtensions),
+  version = "unknown",
 ): Promise<AuditRecon> {
   const manifests = await existingRootFiles(root);
   const scripts = await packageScripts(root);
@@ -414,6 +417,7 @@ export async function buildAuditRecon(
   const surface = securitySurface(files, contents);
   const entries = inferEntrypoints(files, surface);
   const coverageMatrix = buildCoverageMatrix(files, surface, entries, findings, playbook, codeGraph);
+  const threatModel = await buildThreatModel(root, version, entries, surface, codeGraph);
   const focusFiles = unique([
     ...(semanticDelta.basis === "BASELINE_RUN" ? [...semanticDelta.changed, ...semanticDelta.added] : []),
     ...findings.flatMap((finding) => finding.locations.map((location) => location.file)),
@@ -424,7 +428,7 @@ export async function buildAuditRecon(
   const hasJavaScript = files.some((file) => [".js", ".jsx", ".mjs", ".cjs"].includes(extensionWithoutDot(file.path)));
   const projectKind = hasTypeScript ? "NODE_TYPESCRIPT" : hasJavaScript ? "NODE_JAVASCRIPT" : "UNKNOWN";
   const ruleInventory = playbook.rules.filter((rule) => rule.enabled).map(({ id, title, severity, evidenceRequired }) => ({ id, title, severity, evidenceRequired }));
-  const contextDigest = stableDigest({ manifests, scripts, entries, surface, graph, codeGraph: codeGraph.digest, coverageMatrix: coverageMatrix.digest, focusFiles, ruleInventory });
+  const contextDigest = stableDigest({ manifests, scripts, entries, surface, graph, codeGraph: codeGraph.digest, coverageMatrix: coverageMatrix.digest, threatModel: threatModel.digest, focusFiles, ruleInventory });
 
   return {
     schemaVersion: 1,
@@ -437,6 +441,7 @@ export async function buildAuditRecon(
     moduleGraph: { nodes: files.length, edgeCount: graph.edges.length, unresolvedImports: graph.unresolvedImports, edges: graph.edges },
     codeGraph,
     coverageMatrix,
+    threatModel,
     focusFiles,
     contextDigest,
     notes: [
@@ -445,9 +450,25 @@ export async function buildAuditRecon(
       `AST code graph contains ${codeGraph.nodes.length} nodes, ${codeGraph.edges.length} edges, and ${codeGraph.flows.length} possible source-to-sink flows.`,
       "AST flows are candidate evidence; guards, deployment reachability, and exploitability still require independent validation.",
       `Coverage matrix contains ${coverageMatrix.cells.length} area/rule cells; ${coverageMatrix.cells.filter((cell) => cell.status === "HUNT_REQUIRED").length} require hunt coverage.`,
+      `Threat model digest: ${threatModel.digest}; source=${threatModel.source}.`,
       "Workers should receive the task context slice before requesting broader repository context.",
     ],
   };
+}
+
+export function refreshCoverageMatrix(run: AuditRun): void {
+  const matrix = run.recon?.coverageMatrix;
+  if (!matrix) return;
+  for (const cell of matrix.cells) {
+    const relevant = run.findings.filter((finding) => finding.ruleId === cell.ruleId && (cell.area === "repository" || finding.locations.some((location) => cell.files.includes(location.file))));
+    const validated = relevant.some((finding) => finding.status === "VERIFIED" && finding.evidenceTier === "T2_REPRODUCIBLE");
+    if (validated) cell.status = "VALIDATED";
+    else if (relevant.length > 0) cell.status = "CANDIDATE";
+    else cell.status = (cell.attempts ?? 0) > 0 ? "UNKNOWN" : "HUNT_REQUIRED";
+    cell.evidence = [...new Set([...cell.evidence, ...relevant.map((finding) => finding.id)])].sort();
+  }
+  matrix.unknownCells = matrix.cells.filter((cell) => cell.status === "UNKNOWN").length;
+  matrix.digest = stableDigest(matrix.cells);
 }
 
 export function buildAuditPlan(run: AuditRun, tokenBudget = 12_000): AuditPlan {
@@ -495,16 +516,16 @@ export function buildAuditPlan(run: AuditRun, tokenBudget = 12_000): AuditPlan {
     }
   }
 
-  const matrixCells = run.recon?.coverageMatrix?.cells.filter((cell) => ["HUNT_REQUIRED", "UNKNOWN"].includes(cell.status));
+  const matrixCells = run.recon?.coverageMatrix?.cells.filter((cell) => cell.status === "HUNT_REQUIRED" || (cell.status === "UNKNOWN" && (cell.attempts ?? 0) < 2));
   const huntCells = matrixCells && matrixCells.length > 0
     ? matrixCells
     : (run.recon?.ruleInventory ?? [])
       .filter((rule) => !run.findings.some((finding) => finding.ruleId === rule.id))
-      .map((rule) => ({ id: `legacy:${rule.id}`, area: "repository", ruleId: rule.id, files: [], status: "HUNT_REQUIRED" as const, evidence: [] }));
+      .map((rule) => ({ id: `legacy:${rule.id}`, area: "repository", ruleId: rule.id, files: [], status: "HUNT_REQUIRED" as const, evidence: [], attempts: 0 }));
   for (const cell of huntCells) {
     const rule = run.recon?.ruleInventory.find((candidate) => candidate.id === cell.ruleId);
     if (!rule) continue;
-    const id = `hunt:${cell.id}`;
+    const id = `hunt:${cell.id}:pass:${cell.attempts ?? 0}`;
     tasks.push({
       id,
       phase: "HUNT",
